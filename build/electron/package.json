@@ -1,0 +1,8 @@
+{
+  "name": "promedpara-desktop",
+  "productName": "PromedPara",
+  "version": "2.1.0",
+  "description": "PromedPara cashier shell for Windows 7",
+  "main": "main.js",
+  "private": true
+}

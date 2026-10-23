@@ -1,0 +1,10 @@
+PROMEDPARA - KIT D'INSTALLATION POUR WINDOWS 7
+
+Ouvrez le fichier GUIDE.html (double-clic) : le guide pas a pas est dedans.
+
+Resume (3 double-clics, dans cet ordre) :
+  1-VERIFIER-LE-SYSTEME.bat   -> controle le poste, ne modifie rien
+  2-INSTALLER.bat             -> installe (demande les droits administrateur)
+  Raccourci "PromedPara Caisse" sur le bureau -> ouvre la caisse
+
+If you read English: open GUIDE.html, it is written in English with the French screen names.

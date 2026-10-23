@@ -1,0 +1,62 @@
+PROMEDPARA — INSTALL AND SET UP ON THE WORKSTATION
+
+LOCAL-ONLY DESIGN
+- Application files: %LOCALAPPDATA%\PromedPara\app
+- SQLite business database: %LOCALAPPDATA%\PromedPara\data\promedpara.sqlite
+- No account, product, or sales data is sent to a cloud service.
+- A USB drive is only for transferring the installer; remove it after installation.
+
+INSTALL
+1. Copy PromedPara-Local-Install.zip onto the till using a USB drive.
+2. In File Explorer, right-click the ZIP and choose Extract All.
+3. Open the extracted PromedPara-Local-Install folder.
+4. Double-click Install-PromedPara.bat.
+5. Choose Y to start the cashier app. The installer also creates a PromedPara shortcut on the desktop.
+6. After setup is complete, unplug the USB drive. PromedPara will run from the PC.
+7. If the page does not open, try http://localhost:4173. Startup logs are saved in %LOCALAPPDATA%\PromedPara\logs.
+
+FIRST OWNER LOGIN
+1. Create the first owner account on the till. Use a private password of at least 10 characters.
+2. Sign in and open Comptes équipe.
+3. Create a separate cashier account for each worker. Give owner access only to owners.
+
+REVIEW THE OLD PRODUCT LIST
+1. On the workstation, make sure the old export is available at F:\para\Articles_15-10-2026 22-35-00-touts-ar.csv.
+2. Sign in as an owner, open Stock & produits, and choose Trouver le fichier ancien sur ce poste. If it is stored elsewhere, use Choisir un CSV à réviser.
+3. Check the original table and suggested mappings: Article → product name, Famille → category, PRIX_A → purchase cost, PRIX_V → sale price, Qté → quantity, Alert → reorder threshold. Change any mapping that does not match your file.
+4. Review the counts for repeated names, existing names, negative quantities, invalid rows, and zero sale prices. Choose whether repeated names should be skipped or added as separate references. Existing products are never overwritten, and no barcode is invented.
+5. The review does not write to stock. Stop before Confirmer l’ajout until we have reviewed the mapping and exceptions together. Only the final owner confirmation on the workstation writes the admissible rows.
+6. Direct .xlsx upload is not enabled. Export Excel files as CSV first.
+
+CHECK THE EQUIPMENT
+- SUNLUX scanner: connect USB, touch the barcode field, scan a product code.
+- Xprinter: confirm its Windows driver is installed. Complete one sample sale and choose the Xprinter in the receipt print dialog.
+- Rear numeric display: its make, connection and protocol are not known, so this build does not update the red digits yet.
+- Cash drawer: automatic opening depends on its connection; this build does not send a drawer command yet.
+
+WORKER LOGIN WHEN THE BARCODE DOES NOT SCAN
+1. In Comptes équipe, choose Code de secours on that employee's card.
+2. Give the worker the one-time 8-digit code directly. It expires in 10 minutes, works once, and replaces any older code for that employee.
+3. On the cashier login screen, choose Code de secours and enter the code with the large touch keypad. A security notification is added for the owner.
+
+OWNER ANDROID PHONE — DOWNLOAD AND SETUP
+1. Keep the till running and connected to the shop router. Allow Windows Firewall access on the private shop network if prompted.
+2. In the owner dashboard, open “Application Android”. Or enter http://<TILL-WIFI-IP>:4173/owner-app in the phone browser.
+3. Connect the owner phone to the same Wi-Fi and tap “Télécharger l’application Android”.
+4. Open the APK download. If Android asks, allow this browser to install apps, then complete installation.
+5. Open “PromedPara Owner”. Enter the workstation address shown on the download page and sign in with an owner account.
+6. Allow Android notifications and tap “Démarrer la surveillance”. Android displays an ongoing status notification while it listens.
+
+The shareable link is http://<TILL-WIFI-IP>:4173/owner-app. Replace <TILL-WIFI-IP> with the local IPv4 address shown in the owner dashboard. The link and app only work on the shop Wi-Fi while the till is running; they are not available over the public internet. SQLite remains on the workstation. The owner app catches up on stored alerts after reconnecting, but Android battery restrictions can pause background work. Use trusted, password-protected Wi-Fi and do not configure public router port forwarding.
+
+The app notifies on each sale, supplier stock receipt, product addition/import, and product crossing its low-stock threshold. Use the owner dashboard on the workstation if a phone is not needed.
+
+OWNER PLATFORM AND CUSTOMER SHOP PREVIEW
+- The owner dashboard at http://localhost:4173/ includes sales trends, stock alerts, team, and recent events.
+- Use Boutique en ligne in the owner navigation to set the WhatsApp contact and delivery note.
+- The customer catalogue preview is http://localhost:4173/shop. It shows active products, sale prices, and general availability; it never exposes cost prices or exact stock counts.
+- The customer cart opens a WhatsApp message. It does not take online payments, reserve stock, or record an order until a sale is completed at the till.
+- These are local preview URLs. Public internet access requires secure hosting and a domain. Do not forward router ports to the workstation.
+
+BACKUP
+Close PromedPara, then copy the full %LOCALAPPDATA%\PromedPara\data folder to a second local drive or USB drive. Store backups securely.

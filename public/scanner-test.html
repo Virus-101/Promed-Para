@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromedPara · Test du lecteur</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f3; color: #14301f; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 22px; margin: 8px 0; }
+  .card { background: #fff; border: 1px solid #d5ddd6; border-radius: 10px; padding: 14px; margin: 12px 0; }
+  .bars { background: #fff; padding: 12px 0; text-align: center; overflow-x: auto; }
+  canvas { max-width: 100%; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font-size: 16px; padding: 10px 14px; border-radius: 8px; border: 1px solid #1d6b46; background: #fff; color: #1d6b46; }
+  button.on { background: #1d6b46; color: #fff; }
+  input { font-size: 22px; padding: 12px; width: 100%; box-sizing: border-box; border: 2px solid #1d6b46; border-radius: 8px; }
+  .result { font-size: 18px; margin-top: 10px; line-height: 1.5; }
+  .good { color: #14703c; font-weight: bold; } .bad { color: #b3261e; font-weight: bold; }
+  code { background: #eef2ee; padding: 1px 5px; border-radius: 4px; }
+  small { color: #55665a; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Test du lecteur SUNLUX</h1>
+  <p>1) Ouvrez cette page sur le <b>téléphone</b> (même Wi-Fi). 2) Sur la <b>caisse</b>, ouvrez-la aussi et touchez le champ vert. 3) Scannez le code-barres affiché sur le téléphone avec le lecteur.</p>
+
+  <div class="card">
+    <div class="row"><b>Taille des barres :</b>
+      <button data-w="2">Petite</button><button data-w="3" class="on">Moyenne</button><button data-w="4">Grande</button><button data-w="6">Très grande</button>
+    </div>
+    <div class="bars"><canvas id="bc"></canvas></div>
+    <div class="row"><button id="mode-fixed" class="on">Code fixe : TEST-123</button><button id="mode-badge">Faux badge qui change (PP + 14 chiffres)</button></div>
+    <small>Le téléphone doit être à pleine luminosité. Si rien ne se lit : augmentez la taille des barres, éloignez ou rapprochez le téléphone, désactivez le mode sombre.</small>
+  </div>
+
+  <div class="card">
+    <b>Champ du lecteur</b> (touchez-le avant de scanner)
+    <input id="field" autocomplete="off" autocapitalize="characters" placeholder="Le code scanné apparaît ici">
+    <div class="result" id="result">En attente d’un scan…</div>
+  </div>
+</main>
+<script>
+(function () {
+  var P = { '0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4':'nnnwwnnnw','5':'wnnwwnnnn','6':'nnwwwnnnn','7':'nnnwnnwnw','8':'wnnwnnwnn','9':'nnwwnnwnn',
+    'A':'wnnnnwnnw','B':'nnwnnwnnw','C':'wnwnnwnnn','D':'nnnnwwnnw','E':'wnnnwwnnn','F':'nnwnwwnnn','G':'nnnnnwwnw','H':'wnnnnwwnn','I':'nnwnnwwnn','J':'nnnnwwwnn',
+    'K':'wnnnnnnww','L':'nnwnnnnww','M':'wnwnnnnwn','N':'nnnnwnnww','O':'wnnnwnnwn','P':'nnwnwnnwn','Q':'nnnnnnwww','R':'wnnnnnwwn','S':'nnwnnnwwn','T':'nnnnwnwwn',
+    'U':'wwnnnnnnw','V':'nwwnnnnnw','W':'wwwnnnnnn','X':'nwnnwnnnw','Y':'wwnnwnnnn','Z':'nwwnwnnnn','-':'nwnnnnwnw','.':'wwnnnnwnn',' ':'nwwnnnwnn','*':'nwnnwnwnn' };
+  var canvas = document.getElementById('bc'), field = document.getElementById('field'), result = document.getElementById('result');
+  var narrow = 3, text = 'TEST-123', timer = null;
+
+  function draw() {
+    var data = '*' + text + '*', ratio = 3, dpr = window.devicePixelRatio || 1;
+    var units = 20; // quiet zones
+    for (var i = 0; i < data.length; i++) { var pat = P[data.charAt(i)]; for (var j = 0; j < 9; j++) units += pat.charAt(j) === 'w' ? ratio : 1; units += 1; }
+    var cssW = units * narrow, cssH = 110;
+    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = cssW + 'px'; canvas.style.height = cssH + 'px';
+    var g = canvas.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, canvas.width, canvas.height); g.fillStyle = '#000';
+    var x = 10 * narrow * dpr;
+    for (var c = 0; c < data.length; c++) {
+      var p = P[data.charAt(c)];
+      for (var k = 0; k < 9; k++) {
+        var w = (p.charAt(k) === 'w' ? ratio : 1) * narrow * dpr;
+        if (k % 2 === 0) g.fillRect(Math.round(x), 0, Math.round(w), canvas.height);
+        x += w;
+      }
+      x += narrow * dpr; // inter-character gap
+    }
+  }
+  function fakeBadge() {
+    var s = 'PP'; for (var i = 0; i < 14; i++) s += Math.floor(Math.random() * 10); return s;
+  }
+  function setMode(badge) {
+    clearInterval(timer);
+    document.getElementById('mode-fixed').className = badge ? '' : 'on';
+    document.getElementById('mode-badge').className = badge ? 'on' : '';
+    if (badge) { text = fakeBadge(); draw(); timer = setInterval(function () { text = fakeBadge(); draw(); }, 30000); } else { text = 'TEST-123'; draw(); }
+  }
+  var btns = document.querySelectorAll('button[data-w]');
+  for (var b = 0; b < btns.length; b++) btns[b].onclick = function () {
+    narrow = Number(this.getAttribute('data-w')); for (var q = 0; q < btns.length; q++) btns[q].className = btns[q] === this ? 'on' : ''; draw();
+  };
+  document.getElementById('mode-fixed').onclick = function () { setMode(false); };
+  document.getElementById('mode-badge').onclick = function () { setMode(true); };
+
+  // A scanner types the whole code in a few milliseconds, then Enter. A human cannot.
+  var first = 0, last = 0, count = 0;
+  field.addEventListener('keydown', function (e) {
+    var now = Date.now();
+    if (e.key === 'Enter') {
+      var value = field.value, span = last - first, perChar = count > 1 ? span / (count - 1) : 0;
+      var fast = count > 3 && perChar < 60;
+      var html = 'Reçu : <code>' + value.replace(/</g, '&lt;') + '</code> (' + value.length + ' caractères)<br>';
+      html += fast ? '<span class="good">✔ Vitesse de lecteur détectée (' + Math.round(perChar) + ' ms/caractère) : le lecteur fonctionne en mode clavier.</span>'
+                   : '<span class="bad">✘ Saisie lente : c’était sans doute une frappe au clavier, pas le lecteur.</span>';
+      if (fast && /^(TEST-123|PP\d{14})$/.test(value)) html += '<br><span class="good">✔ Code correct : ce lecteur lit le code-barres d’un écran de téléphone.</span>';
+      else if (fast) html += '<br><span class="bad">✘ Lecture incomplète ou erronée. Essayez une autre taille ou luminosité.</span>';
+      result.innerHTML = html; field.value = ''; first = last = count = 0; e.preventDefault(); return;
+    }
+    if (e.key.length === 1) { if (!count) first = now; last = now; count++; }
+  });
+  document.addEventListener('click', function () { field.focus(); });
+  draw();
+})();
+</script>
+</body>
+</html>

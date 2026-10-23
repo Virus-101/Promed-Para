@@ -1,0 +1,15 @@
+PROMEDPARA WORKSTATION — START HERE
+
+1. Extract PromedPara-Complete-Project.zip.
+2. Open the extracted PromedPara-Complete-Project folder.
+3. Double-click Install-PromedPara.bat and choose Y.
+4. Create the first owner account on the workstation.
+5. Open Stock & produits and review the product CSV before importing. Do not press the final confirmation until you have checked the mappings and skipped-row counts.
+6. Connect the SUNLUX barcode reader and install the Xprinter Windows driver.
+
+The app and SQLite business database run on this workstation. The database is stored under:
+%LOCALAPPDATA%\PromedPara\data\promedpara.sqlite
+
+The owner and worker Android apps connect over the same shop Wi-Fi. Remote internet access is not included. The rear red display and cash drawer still need hardware identification before this software can control them.
+
+Read README.txt for the full setup steps, CSV review, Android pairing, backups, and troubleshooting.

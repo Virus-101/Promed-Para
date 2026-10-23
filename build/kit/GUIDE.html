@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromedPara - Step-by-step guide</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; background: #f4f6f3; color: #14301f; margin: 0; line-height: 1.5; }
+  main { max-width: 860px; margin: 0 auto; padding: 18px; }
+  h1 { font-size: 28px; margin: 6px 0; } h2 { font-size: 21px; margin: 0 0 8px; color: #1d6b46; } h3 { font-size: 16px; margin: 14px 0 4px; }
+  .step { background: #fff; border: 1px solid #d5ddd6; border-radius: 10px; padding: 16px 18px; margin: 14px 0; }
+  .num { display: inline-block; background: #1d6b46; color: #fff; border-radius: 50%; width: 30px; height: 30px; text-align: center; line-height: 30px; margin-right: 8px; font-weight: bold; }
+  code, .k { background: #eef2ee; padding: 1px 6px; border-radius: 4px; font-family: Consolas, monospace; }
+  .fr { color: #0b4a2c; font-weight: bold; }
+  .warn { background: #fff7e0; border: 1px solid #e8cf86; border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  .bad { background: #fdecea; border: 1px solid #e3a6a1; border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  .good { background: #e9f6ee; border: 1px solid #a9d6ba; border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  table { border-collapse: collapse; width: 100%; } td, th { border: 1px solid #d5ddd6; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #eef2ee; } ul, ol { margin: 6px 0 6px 22px; padding: 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>PromedPara - install guide for the Windows 7 till</h1>
+<p>Screen names are written in French exactly as you will see them: <span class="fr">like this</span>. Everything is done by double-clicking; you never type a command.</p>
+
+<div class="good"><b>What this kit does.</b> The till (ALPHATEAM-PC, Windows 7 32-bit, 2 GB) runs the cashier app and keeps the database. The Sunlux scanner reads a changing barcode on the worker's phone to open the till. Owners use an Android app. All files, including the right 32-bit Node.js for Windows 7, are inside this folder, so <b>no internet is needed on the till</b>.</div>
+
+<div class="step"><h2><span class="num">1</span>Copy the kit to the till</h2>
+<ol>
+<li>Plug the USB drive into the till. Copy the whole folder <code>PromedPara-USB</code> to the Windows <b>Desktop</b> (running from the desktop is faster and safer than from the USB).</li>
+<li>Open the copied folder. You should see <code>1-VERIFIER-LE-SYSTEME.bat</code>, <code>2-INSTALLER.bat</code>, and the folders <code>app</code>, <code>runtime</code>, <code>android</code>, <code>tools</code>.</li>
+</ol></div>
+
+<div class="step"><h2><span class="num">2</span>Check the till (changes nothing)</h2>
+<ol>
+<li>Double-click <b>1-VERIFIER-LE-SYSTEME.bat</b>. Wait about 30 seconds without touching anything.</li>
+<li>Read the result at the bottom:
+ <ul>
+ <li><span style="color:#14703c;font-weight:bold">PRET A INSTALLER</span> - go to step 3. Yellow <b>[ATTENTION]</b> lines are advice, not blockers.</li>
+ <li><span style="color:#b3261e;font-weight:bold">PROBLEME(S) A CORRIGER</span> - each red <b>[ ERREUR ]</b> line says what to do. Fix it, run the check again.</li>
+ </ul></li>
+<li>The check also starts the real server for a few seconds on a test port with a temporary database, so a green result means the program really runs on this PC.</li>
+<li>A report is saved as <code>RAPPORT-VERIFICATION.txt</code> in the folder. If anything stays red, take a photo of the screen or send that file.</li>
+</ol>
+<table>
+<tr><th>The check looks at</th><th>Why it matters</th></tr>
+<tr><td>Windows 7 SP1, free RAM / disk</td><td>The program needs Service Pack 1 and about 300 MB of disk.</td></tr>
+<tr><td>Date and time (and drift vs internet)</td><td>The phone badge changes every 30 s and is computed from the clock. Till and phone clocks must agree within 30 s.</td></tr>
+<tr><td>Files intact (SHA-256 of every file)</td><td>Detects a bad USB copy.</td></tr>
+<tr><td>Node 12 + SQLite self-test and a real server start</td><td>Proves the engine runs on this exact machine.</td></tr>
+<tr><td>Port 4173 free</td><td>Another program using the port would block the till.</td></tr>
+<tr><td>Chrome (or Firefox) version</td><td>The cashier screen runs in the browser. Chrome 109 is the last version for Windows 7.</td></tr>
+<tr><td>Xprinter driver, network address</td><td>Receipt printing, and the address the phones must use.</td></tr>
+</table></div>
+
+<div class="step"><h2><span class="num">3</span>Install</h2>
+<ol>
+<li>Double-click <b>2-INSTALLER.bat</b>. Click <span class="fr">Oui</span> when Windows asks for administrator rights.</li>
+<li>It runs the check again, then: copies the program to <code>C:\PromedPara</code>, opens the firewall for port 4173 <b>for your local network only</b>, creates two desktop shortcuts (<span class="fr">PromedPara Caisse</span> and <span class="fr">Test lecteur code-barres</span>). Check the Desktop: you should see the green star icon.</li>
+<li><b>PromedPara is a real desktop application</b> (Electron, file <code>C:\PromedPara\electron\PromedPara.exe</code>), not a web link. It starts the local server by itself, opens its own window, and prints receipts directly on the default printer without a print window. Receipts need the Xprinter set as default printer.</li>
+<li><b>Backup plan:</b> if the app ever refuses to open, double-click <span class="fr">PromedPara (mode secours Chrome)</span> inside <code>C:\PromedPara</code>. It opens the same cashier in Chrome.</li>
+<li>Three questions, answer <b>O</b> (oui) then Enter, unless you disagree:
+ <ul><li>start PromedPara automatically when the PC powers on (recommended: after a power cut the till is ready by itself);</li>
+ <li>stop Windows going to sleep while plugged in (recommended: a sleeping till cannot answer the phones);</li>
+ <li>launch PromedPara now.</li></ul></li>
+<li>The database lives in <code>C:\PromedPara\data</code>. Re-running the installer later (for an update) <b>never touches the data</b>.</li>
+</ol></div>
+
+<div class="step"><h2><span class="num">4</span>Logins: one short code for everybody</h2>
+<p>Nobody types a username or a long password at the till. Each person has <b>one personal code of 6 digits</b>, tapped on the touch keypad of the login screen. The Sunlux also works on the same screen for phone badges.</p>
+<table>
+<tr><th>Level</th><th>Who creates it</th><th>What it can do</th></tr>
+<tr><td><b>Admin</b> (you)</td><td>The very first screen, on the till</td><td>Everything an owner can, plus: create the owner, give an owner a new temporary code if forgotten, make a new recovery key.</td></tr>
+<tr><td><b>Owner</b></td><td>The admin</td><td>Stock, prices, suppliers, sales, workers and their codes. Cannot create owners.</td></tr>
+<tr><td><b>Worker</b></td><td>Owner or admin</td><td>Sell. Optional rights switched on by the owner.</td></tr>
+</table>
+<ol>
+<li>Double-click <span class="fr">PromedPara Caisse</span> (green star icon on the Desktop).</li>
+<li><b>First screen: <span class="fr">Créer le compte administrateur</span>.</b> Type your name, then your 6-digit code twice. Avoid 123456 or 111111 (refused).</li>
+<li><b>Then the recovery key appears, once:</b> 16 characters like <code>CNXS-F4FF-FUWF-3893</code>. <b>Write it on paper now</b> and keep it away from the till. It is the way back in if you forget your code. Press <span class="fr">J'ai noté la clé</span> only when it is written.</li>
+<li><b>The owner's login:</b> sign in as admin &rarr; <span class="fr">Comptes équipe</span> &rarr; <span class="fr">Créer un compte</span> &rarr; role <span class="fr">Propriétaire</span>. A <b>temporary 6-digit code</b> is shown once: give it to the owner. On first sign-in the owner is forced to choose his own code.</li>
+<li><b>Workers:</b> the owner (or you) creates the account, then on the worker's card <span class="fr">+ Code PIN</span> (step 7).</li>
+<li><b>Changing my code:</b> <span class="fr">Comptes équipe</span> &rarr; my card &rarr; <span class="fr">Changer mon code</span>.</li>
+</ol>
+<h3>If a code is forgotten</h3>
+<table>
+<tr><th>Who forgot</th><th>What to do</th></tr>
+<tr><td>A worker</td><td>The owner opens the worker's card &rarr; <span class="fr">Changer le code PIN</span> (or leave empty to generate one).</td></tr>
+<tr><td>The owner</td><td>The admin opens the owner's card &rarr; <span class="fr">Nouveau code temporaire</span>. The owner picks a new code at the next sign-in.</td></tr>
+<tr><td>You (admin)</td><td>Login screen &rarr; <span class="fr">Code oublié ?</span> &rarr; <span class="fr">J'ai ma clé de récupération</span> &rarr; type the key and a new code. A <b>new</b> recovery key is then shown: write it down (the old one stops working).</td></tr>
+<tr><td>You, and the recovery key is lost too</td><td>On the till, in <code>C:\PromedPara</code>, double-click <b>RESET-CODE-ADMIN.bat</b> (needs the Windows administrator password, asks you to type OUI). It prints a temporary code and a new recovery key. Sales and products are not touched; a copy of the database is made first.</td></tr>
+</table>
+<p><b>Safety rules built in:</b> the code login works only on the till itself, never from a phone over Wi-Fi. After 8 wrong codes in 10 minutes the keypad locks for 10 minutes and the owners are notified. After 5 wrong recovery keys, recovery locks for an hour.</p></div>
+
+<div class="step"><h2><span class="num">5</span>Test the Sunlux scanner on a phone screen (do this before anything else)</h2>
+<div class="warn"><b>Why first:</b> some 1D laser scanners cannot read a barcode shown on a phone screen at all. Better to find out now. If it fails, nothing is lost: workers can still log in with the one-time 8-digit code, and a scanner that reads screens is cheap.</div>
+<ol>
+<li>On the till, double-click the desktop shortcut <span class="fr">Test lecteur code-barres</span>. Touch the green field.</li>
+<li>On a phone connected to the shop Wi-Fi, open <code>http://&lt;till address&gt;:4173/scanner-test.html</code>. The till address is shown at the end of the check (for example <code>http://192.168.1.20:4173</code>).</li>
+<li>Scan the barcode on the phone with the Sunlux. Try the four bar sizes and full phone brightness.</li>
+<li>Success looks like: <b>"Vitesse de lecteur détectée"</b> and <b>"Code correct"</b>. Then also try the button <span class="fr">Faux badge qui change</span>.</li>
+<li>If the Sunlux types characters but they are wrong (digits missing, other symbols): the scanner is set to a different keyboard layout or does not have Code 39 enabled; see the scanner's manual for "Code 39 enable".</li>
+</ol></div>
+
+<div class="step"><h2><span class="num">6</span>Bring in the product list from the old software (LOGICA)</h2>
+<ol>
+<li>If the old list is not already exported: in LOGICA, export the list of articles to a CSV file (it is named like <code>Articles_15-10-2026 22-35-00-touts-ar.csv</code>). Put it on the Desktop, or on a USB drive.</li>
+<li>Sign in as owner and open <span class="fr">Stock &amp; produits</span>. <b>While the catalogue is empty, PromedPara looks for that file by itself</b> (Desktop, Documents, Downloads, drive folders, USB drives) and shows a green banner <span class="fr">Liste de l'ancien logiciel détectée</span>. Touch <span class="fr">Réviser et importer</span>.</li>
+<li>If several candidates exist, you get a list (newest first) to pick from. The button <span class="fr">Trouver le fichier ancien sur ce poste</span> repeats the search at any time. If nothing is found, use <span class="fr">Choisir un CSV à réviser</span> and pick the file by hand.</li>
+<li>Check the column mapping (Article &rarr; name, Famille &rarr; category, PRIX_A &rarr; purchase price, PRIX_V &rarr; sale price, Qté &rarr; quantity, Alert &rarr; threshold). <b>Nothing is written until you tick the confirmation and press <span class="fr">Confirmer l'ajout</span>.</b> Duplicates are skipped, existing products are never overwritten.</li>
+<li>The old export has no barcodes. Add them product by product: <span class="fr">Stock &amp; produits</span> &rarr; <span class="fr">Modifier</span> &rarr; touch the barcode field and scan the box with the Sunlux.</li>
+</ol></div>
+
+<div class="step"><h2><span class="num">7</span>Create a worker and pair the phone</h2>
+<ol>
+<li>Owner (or admin): <span class="fr">Comptes équipe</span> &rarr; <span class="fr">Créer un compte</span> &rarr; role <span class="fr">Employé</span>, leave the password empty.</li>
+<li>On that worker's card touch <span class="fr">Associer un téléphone</span>. A 12-character code appears (valid 5 minutes, once) with the till address and the app download link.</li>
+<li>On the worker's Android phone (same Wi-Fi): open the download link, install <b>PromedPara Worker</b> (allow "install from this source" if Android asks), enter the till address and the code.</li>
+<li>The phone now shows a barcode that changes every 30 seconds.</li>
+<li>At the till: login screen &rarr; tab <span class="fr">Employé</span> &rarr; scan the phone barcode with the Sunlux. A barcode works only once; a screenshot of it is useless.</li>
+<li><b>Short code (PIN) instead of the phone:</b> on the worker's card touch <span class="fr">+ Code PIN</span>. Type 6 digits, or leave it empty to generate one (shown once, write it down and tell the worker). At the till the worker just taps the 6 digits on the touch keypad of the login screen. The pad also accepts the Sunlux, so badges and PINs both work on the same screen.
+ <ul><li>The PIN works <b>only on the till itself</b>, never from a phone over Wi-Fi.</li><li>Each PIN is unique; simple ones like 123456 or 111111 are refused.</li><li>After 8 wrong tries in 10 minutes the keypad locks for 10 minutes and you get a notification.</li><li>A PIN is easier to watch over a shoulder than a changing badge, so use the badge for workers you trust less. <span class="fr">Retirer le PIN</span> removes it.</li></ul></li>
+<li>Lost phone: <span class="fr">Révoquer</span> on the card. Phone dead or scan failing: <span class="fr">Code de secours</span> gives an 8-digit one-time code that the worker types on the touch keypad.</li>
+</ol></div>
+
+<div class="step"><h2><span class="num">8</span>Let a worker add products, only when needed</h2>
+<p>On the worker's card in <span class="fr">Comptes équipe</span> there are two switches:</p>
+<ul>
+<li><span class="fr">Peut réceptionner les livraisons</span> - adds delivered quantities to existing products (no time limit, until you switch it off).</li>
+<li><span class="fr">Peut ajouter des produits (8 h)</span> - the worker gets a <span class="fr">Nouveau produit</span> screen to create new products. It <b>expires by itself after 8 hours</b>, you can switch it off any time, and you get a notification saying who added what. Workers can never edit or delete existing products, change prices of existing products, import files, or see reports.</li>
+</ul>
+<p>The worker must sign in again after you switch it on, so the screen appears.</p></div>
+
+<div class="step"><h2><span class="num">9</span>Owner phone: notifications</h2>
+<ol>
+<li>On an owner's Android phone (same Wi-Fi as the till), open <code>http://&lt;till address&gt;:4173/owner-app</code> and install <b>PromedPara Owner</b>.</li>
+<li>Enter the till address, sign in with the owner account, allow notifications, touch <span class="fr">Démarrer la surveillance</span>.</li>
+<li>You get an alert for each sale, delivery received, product added, low-stock threshold crossed, and security events (new badge, recovery code).</li>
+</ol>
+<div class="warn"><b>Honest limit:</b> this version has no cloud. The alerts reach the phone <b>only while the phone is on the shop Wi-Fi</b> and the till is on. When an owner is away from the shop, nothing arrives; missed alerts are shown when the phone reconnects. Alerts away from the shop need an internet relay, which can be added as a next step (it would send sale information through an outside service, so it is your decision).</div></div>
+
+<div class="step"><h2><span class="num">10</span>Printer, cash drawer, customer display</h2>
+<ul>
+<li><b>Xprinter:</b> install its Windows driver, set the paper width (58 or 80 mm) in the printer properties, and make it the <b>default printer</b>. The launcher then prints receipts directly with no dialog. If the receipt layout is off, change the paper width.</li>
+<li><b>Cash drawer:</b> it is not opened by the software yet. If its cable goes into the Xprinter (RJ11/RJ12), it can usually be opened by the printer; that needs its model and a test, so it is not guessed here.</li>
+<li><b>Red customer display:</b> not connected to the software yet; same reason (model and protocol unknown).</li>
+</ul></div>
+
+<div class="step"><h2><span class="num">11</span>Every day</h2>
+<ul>
+<li><b>Open:</b> power on the till; PromedPara starts alone (if you chose that). Otherwise double-click <span class="fr">PromedPara Caisse</span>.</li>
+<li><b>Worker:</b> scans the badge, sells. At the end, <span class="fr">Déconnexion</span>.</li>
+<li><b>Power cut:</b> sales are written to disk within a quarter of a second, so at worst the sale being typed is lost. Just power on again.</li>
+<li><b>Backups:</b> automatic daily copy in <code>C:\PromedPara\data\backups</code> (last 30 days). Once a week double-click <b>SAUVEGARDER-LES-DONNEES.bat</b> (in <code>C:\PromedPara</code>) with a USB drive plugged in: it copies the database to the Desktop and to the USB. Keep that USB away from the till.</li>
+<li><b>Stop the server:</b> <code>ARRETER-LA-CAISSE.bat</code> (rarely needed).</li>
+</ul></div>
+
+<div class="step"><h2><span class="num">12</span>Automatic updates from GitHub (with backup versions)</h2>
+<p>Updates are published by you on a free public GitHub repository. The till checks it every 6 hours, downloads a small signed package (about 3 MB), and installs it <b>between 03:00 and 05:00</b>, at the next start, or right away when an owner presses <span class="fr">Installer maintenant</span> (<span class="fr">Matériel</span> &rarr; <span class="fr">Mises à jour</span>).</p>
+<h3>Why it is safe</h3>
+<ul>
+<li>Every update is <b>signed with a private key that only you have</b>. The till refuses anything not signed by it, even if someone took over your GitHub account.</li>
+<li>Before installing, the till <b>copies the database</b>. The sales, products and accounts are never part of an update.</li>
+<li>The previous <b>3 versions are kept on the till</b>. <span class="fr">Matériel</span> &rarr; <span class="fr">Versions de secours</span> &rarr; <span class="fr">Revenir à cette version</span> goes back in about 30 seconds.</li>
+<li>If a new version does not start correctly within 90 seconds, the till <b>goes back to the working version by itself</b> and never retries that broken version.</li>
+<li>Old versions also stay on GitHub (Releases), so you can always publish an older one again.</li>
+</ul>
+<h3>One-time setup: create the GitHub repository</h3>
+<ol>
+<li>On any PC, open <code>github.com</code>. Click <b>Sign up</b> (free) and create an account, or sign in. Use an email you control and enable two-factor login.</li>
+<li>Click <b>+</b> (top right) &rarr; <b>New repository</b>.</li>
+<li>Repository name: <code>promedpara-updates</code>. Visibility: <b>Public</b> (this is required so the till can download without a password). Tick <b>Add a README file</b>. Click <b>Create repository</b>.</li>
+<li>Write down the full name shown at the top: <code>youraccount/promedpara-updates</code>. Nothing private goes in there: only update packages. Never upload sales data, and never your private signing key.</li>
+<li>On the till, in <code>C:\PromedPara</code>, double-click <b>CONFIGURER-LES-MISES-A-JOUR.bat</b> (answer Oui) and type <code>youraccount/promedpara-updates</code>.</li>
+</ol>
+<h3>To publish an update (every time)</h3>
+<ol>
+<li>I build the release on my side with the private key and give you a folder with 3 files: <code>latest.json</code>, <code>latest.json.sig</code> and <code>update-X.Y.Z.ppk</code>.</li>
+<li>On GitHub open your repository &rarr; right side <b>Releases</b> &rarr; <b>Create a new release</b>.</li>
+<li><b>Choose a tag</b>: type <code>vX.Y.Z</code> (same number, e.g. <code>v2.1.1</code>) and choose <b>Create new tag</b>. Title: the same. Drag the 3 files into <b>Attach binaries</b>. Keep <b>Set as the latest release</b> ticked. Click <b>Publish release</b>.</li>
+<li>Within 6 hours the till finds it. To test right away: <span class="fr">Matériel</span> &rarr; <span class="fr">Vérifier maintenant</span>.</li>
+<li>Never delete old releases: they are your backup versions.</li>
+</ol>
+<div class="warn"><b>Keep your private signing key safe.</b> It is the file <code>update-private.pem</code> in the folder <code>PromedPara-keys</code> in the Windows user folder of the PC where updates are built. Put a copy on a USB drive stored away from the till and from this kit. If it is lost, the till can no longer accept updates (you would reinstall once from the USB with a new key). If someone else gets it, they could publish updates that tills would accept: tell me immediately.</div>
+<p>Updates work only in the Electron app. The Chrome backup mode and the Windows 7 runtime itself (Node, Electron) are not updated automatically; those changes come by USB.</p></div>
+
+<div class="step"><h2>If something goes wrong</h2>
+<div class="good"><b>Get the errors in one click:</b> double-click <b>3-COLLECTER-LES-ERREURS.bat</b> (with the USB drive plugged in). It gathers the check report, install log, server log, firewall, printers and Windows errors into one file <code>ERREURS-PromedPara-....txt</code>, saved on the Desktop <b>and</b> on the USB. Bring the USB back to the PC, or send the file.</div>
+<table>
+<tr><th>Symptom</th><th>What to do</th></tr>
+<tr><td>Nothing opens after double-clicking the shortcut</td><td>Wait 20 s on a slow start. Then open <code>C:\PromedPara\logs\serveur-erreurs.log</code> and send it, or re-run <b>1-VERIFIER-LE-SYSTEME.bat</b>.</td></tr>
+<tr><td>Phones cannot connect</td><td>Phone and till must be on the same Wi-Fi/router. Re-run the installer (it recreates the firewall rule). Test from the phone browser: <code>http://&lt;till address&gt;:4173/api/status</code> must show text.</td></tr>
+<tr><td>"Badge non valide"</td><td>Check clocks on till and phone (within 30 s; set both to automatic time). Wait for the next code and scan again. Otherwise use <span class="fr">Code de secours</span>.</td></tr>
+<tr><td>Screen is slow or jerky</td><td>Close other programs and browser windows. The till has no graphics acceleration; the launcher already disables it for Chrome.</td></tr>
+<tr><td>Wi-Fi network is classed "Public" in Windows</td><td>The firewall rule already covers all profiles but only for the local subnet. Nothing to change.</td></tr>
+<tr><td>Update to a newer kit later</td><td>Copy the new folder, run its <b>2-INSTALLER.bat</b>. The data in <code>C:\PromedPara\data</code> stays.</td></tr>
+</table></div>
+
+<div class="bad"><b>Security reminders.</b> Choose a strong owner password. Do not forward ports on the router (the app is meant for the shop network only). Use a Wi-Fi password the customers do not know. The phone-to-till link is plain HTTP on your own network.</div>
+
+<p><small>Technical note: the kit bundles Node.js 12.22.12 (32-bit, the last line that runs on Windows 7) and a pure-JavaScript SQLite (sql.js), so nothing needs compiling or installing besides this kit.</small></p>
+</main>
+</body>
+</html>

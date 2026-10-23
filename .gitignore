@@ -1,0 +1,9 @@
+data/
+build/node_modules/
+build/runtime-cache/
+build/release-config.json
+*private*.pem
+*.sqlite
+*.sqlite-*
+RAPPORT-VERIFICATION.txt
+ERREURS-PromedPara-*.txt

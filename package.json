@@ -1,0 +1,15 @@
+{
+  "name": "promedpara-workstation",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Local-first POS and owner dashboard for PromedPara",
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^7.6.2"
+  }
+}
