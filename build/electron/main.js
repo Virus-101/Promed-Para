@@ -83,10 +83,16 @@ function ensureServer() {
   });
 }
 
-const LOADING = 'data:text/html;charset=utf-8,' + encodeURIComponent(
-  '<body style="margin:0;font-family:Segoe UI,Arial;background:#1b4d33;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh">' +
-  '<div style="text-align:center"><div style="font-size:64px">&#10035;</div><div style="font-size:28px;font-weight:bold">PromedPara</div>' +
-  '<div style="margin-top:14px;opacity:.8">D&eacute;marrage de la caisse&hellip;</div></div></body>');
+// Splash screen with the Promed Parapharmacie logo (white version on the brand green); falls back to text if the file is missing.
+function splash(message) {
+  let logo = '';
+  try { logo = 'data:image/png;base64,' + fs.readFileSync(path.join(ROOT, 'app', 'public', 'img', 'logo-full-light.png')).toString('base64'); } catch (e) { /* text only */ }
+  return 'data:text/html;charset=utf-8,' + encodeURIComponent(
+    '<body style="margin:0;font-family:Segoe UI,Arial;background:#1b4d33;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh">' +
+    '<div style="text-align:center">' + (logo ? '<img src="' + logo + '" alt="Promed Parapharmacie" style="width:300px;max-width:60vw;height:auto">' : '<div style="font-size:30px;font-weight:bold">PromedPara</div>') +
+    '<div style="margin-top:22px;opacity:.85;font-size:17px">' + message + '</div></div></body>');
+}
+const LOADING = splash('D&eacute;marrage de la caisse&hellip;');
 
 function createWindow() {
   Menu.setApplicationMenu(null);
@@ -132,7 +138,7 @@ app.whenReady().then(async () => {
     try {
       updater = require('./updater').create({ root: ROOT, dataDir: DATA_DIR, port: PORT, log, quit: () => app.exit(0) });
       // An update downloaded earlier is installed now, before the cashier opens.
-      if (updater.applyAtStart()) { log('installation d une mise a jour au demarrage'); if (win) win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<body style="margin:0;font-family:Segoe UI,Arial;background:#1b4d33;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh"><div style="text-align:center"><div style="font-size:28px;font-weight:bold">Mise &agrave; jour de PromedPara</div><div style="margin-top:14px;opacity:.8">Installation en cours, la caisse red&eacute;marre dans un instant&hellip;</div></div></body>')); setTimeout(() => app.exit(0), 1500); return; }
+      if (updater.applyAtStart()) { log('installation d une mise a jour au demarrage'); if (win) win.loadURL(splash('Mise &agrave; jour de PromedPara : installation en cours, la caisse red&eacute;marre dans un instant&hellip;')); setTimeout(() => app.exit(0), 1500); return; }
     } catch (e) { log('updater indisponible: ' + e.message); updater = null; }
   }
   if (win) win.loadURL(ORIGIN + START_PAGE);

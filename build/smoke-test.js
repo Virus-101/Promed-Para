@@ -168,6 +168,7 @@ const totp = (secretHex, step) => {
   r = await owner2('POST', '/api/login', { username: 'owner', password: 'wrong-password-1' }); ok('wrong password refused', r.status === 401, r);
   ok('backup folder created on second start', fs.existsSync(path.join(DATA, 'backups')) && fs.readdirSync(path.join(DATA, 'backups')).length === 1);
 
+  for (const f of ['/icons.js', '/icons-LICENSE.txt', '/img/mark.png', '/img/mark-light.png', '/img/mark-black.png', '/img/logo-full-light.png', '/img/favicon.ico', '/img/app-icon-180.png']) { r = await fetch(BASE + f); ok('brand/icon file ' + f + ' is served', r.status === 200); }
   r = await fetch(BASE + '/shop'); ok('/shop page served', r.status === 200);
   r = await fetch(BASE + '/PromedPara-Owner.apk'); const apk = Buffer.from(await r.arrayBuffer()); ok('owner APK downloadable and intact (zip header)', r.status === 200 && apk.length === fs.statSync(path.join(KIT, 'android', 'PromedPara-Owner.apk')).size && apk.slice(0, 2).toString() === 'PK', { status: r.status, len: apk.length });
   await stop();

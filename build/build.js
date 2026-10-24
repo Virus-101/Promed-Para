@@ -80,6 +80,8 @@ copyDir(electronCache, path.join(OUT, 'electron'), n => n === 'default_app.asar'
 const localeDir = path.join(OUT, 'electron', 'locales');
 for (const name of fs.readdirSync(localeDir)) if (!['en-US.pak', 'fr.pak'].includes(name)) fs.unlinkSync(path.join(localeDir, name));
 fs.renameSync(path.join(OUT, 'electron', 'electron.exe'), path.join(OUT, 'electron', 'PromedPara.exe'));
+// Logo + product info inside the .exe itself (taskbar, Explorer)
+require('child_process').execFileSync(process.execPath, [path.join(__dirname, 'set-exe-icon.js'), path.join(OUT, 'electron', 'PromedPara.exe'), path.join(__dirname, 'assets', 'icon.ico'), VERSION], { stdio: 'inherit' });
 const shellDir = path.join(OUT, 'electron', 'resources', 'app');
 fs.mkdirSync(shellDir, { recursive: true });
 for (const f of ['main.js', 'preload.js', 'package.json', 'updater.js']) fs.copyFileSync(path.join(__dirname, 'electron', f), path.join(shellDir, f));
@@ -89,6 +91,8 @@ copyDir(path.join(__dirname, 'assets'), path.join(OUT, 'assets'));
 
 // 5. Scripts, guides and Android sources.
 if (fs.existsSync(KIT)) copyDir(KIT, OUT);
+// Logo at the top of the guide (embedded, so it also prints/opens offline)
+try { const guide = path.join(OUT, 'GUIDE.html'); const logoB64 = fs.readFileSync(path.join(__dirname, 'assets', 'guide-logo.png')).toString('base64'); fs.writeFileSync(guide, fs.readFileSync(guide, 'utf8').replace('<!--LOGO-->', '<img src="data:image/png;base64,' + logoB64 + '" alt="Promed Parapharmacie" style="width:200px;height:auto;display:block;margin:0 0 6px">')); } catch (e) { console.warn('guide logo skipped:', e.message); }
 copyDir(path.join(SRC, 'owner-android'), path.join(OUT, 'android-source', 'owner-android'), n => n === 'build');
 copyDir(path.join(SRC, 'worker-android'), path.join(OUT, 'android-source', 'worker-android'), n => n === 'build');
 fs.mkdirSync(path.join(OUT, 'android'), { recursive: true });

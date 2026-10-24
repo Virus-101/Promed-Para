@@ -20,6 +20,7 @@
   code { background: #eef2ee; padding: 1px 5px; border-radius: 4px; }
   small { color: #55665a; }
 </style>
+<link rel="icon" href="/img/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/img/app-icon-180.png"><script src="/icons.js"></script>
 </head>
 <body>
 <main>
@@ -93,10 +94,10 @@
       var value = field.value, span = last - first, perChar = count > 1 ? span / (count - 1) : 0;
       var fast = count > 3 && perChar < 60;
       var html = 'Reçu : <code>' + value.replace(/</g, '&lt;') + '</code> (' + value.length + ' caractères)<br>';
-      html += fast ? '<span class="good">✔ Vitesse de lecteur détectée (' + Math.round(perChar) + ' ms/caractère) : le lecteur fonctionne en mode clavier.</span>'
-                   : '<span class="bad">✘ Saisie lente : c’était sans doute une frappe au clavier, pas le lecteur.</span>';
-      if (fast && /^(TEST-123|PP\d{14})$/.test(value)) html += '<br><span class="good">✔ Code correct : ce lecteur lit le code-barres d’un écran de téléphone.</span>';
-      else if (fast) html += '<br><span class="bad">✘ Lecture incomplète ou erronée. Essayez une autre taille ou luminosité.</span>';
+      html += fast ? '<span class="good">' + ico('circle-check', 18) + ' Vitesse de lecteur détectée (' + Math.round(perChar) + ' ms/caractère) : le lecteur fonctionne en mode clavier.</span>'
+                   : '<span class="bad">' + ico('circle-x', 18) + ' Saisie lente : c’était sans doute une frappe au clavier, pas le lecteur.</span>';
+      if (fast && /^(TEST-123|PP\d{14})$/.test(value)) html += '<br><span class="good">' + ico('circle-check', 18) + ' Code correct : ce lecteur lit le code-barres d’un écran de téléphone.</span>';
+      else if (fast) html += '<br><span class="bad">' + ico('circle-x', 18) + ' Lecture incomplète ou erronée. Essayez une autre taille ou luminosité.</span>';
       result.innerHTML = html; field.value = ''; first = last = count = 0; e.preventDefault(); return;
     }
     if (e.key.length === 1) { if (!count) first = now; last = now; count++; }

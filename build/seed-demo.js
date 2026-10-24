@@ -8,7 +8,7 @@ const call = async (m, u, b) => {
   return r.json().catch(() => ({}));
 };
 (async () => {
-  await call('POST', '/api/setup', { name: 'Demo Owner', username: 'demo', password: 'demo-password-1' });
+  await call('POST', '/api/setup', { name: 'Demo Admin', pin: '482913' });
   const items = [
     ['Doliprane 1000mg', '6111000000017', 25.5, 18, 40, 10, 'Médicaments'], ['Efferalgan 500mg', '6111000000024', 22, 15, 3, 5, 'Médicaments'],
     ['Crème solaire SPF50', '6111000000031', 149, 95, 12, 4, 'Solaire'], ['Shampooing doux 400ml', '6111000000048', 69, 45, 20, 6, 'Cheveux'],
@@ -22,5 +22,5 @@ const call = async (m, u, b) => {
   for (const lines of [[[0, 2], [7, 1]], [[2, 1]], [[3, 1], [6, 2]], [[1, 1]]]) {
     await call('POST', '/api/sales', { lines: lines.map(([i, qty]) => ({ productId: ids[i], qty })), payment: 'Espèces', received: 500 });
   }
-  console.log('demo ready: login demo / demo-password-1');
+  console.log('demo ready: admin code 482913');
 })();
