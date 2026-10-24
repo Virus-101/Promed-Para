@@ -7,3 +7,4 @@ build/release-config.json
 *.sqlite-*
 RAPPORT-VERIFICATION.txt
 ERREURS-PromedPara-*.txt
+build/_patch-*.js
