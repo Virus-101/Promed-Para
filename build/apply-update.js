@@ -17,7 +17,7 @@ const MODE = args.mode || 'apply';               // apply | rollback
 const TARGET = args.version;                      // version we expect to be running afterwards
 const SOURCE = args.source;                       // staged dir (apply) or versions/<v> dir (rollback)
 const HEALTH_SECONDS = Number(args.health || 90);
-const KEEP_VERSIONS = 3;
+const KEEP_VERSIONS = 2;
 const TEST = args.test === '1';                   // tests start the server directly instead of the Electron app
 
 const DIRS = { app: 'app', shell: path.join('electron', 'resources', 'app'), tools: 'tools' };
@@ -152,7 +152,7 @@ async function main() {
   fs.writeFileSync(path.join(ROOT, 'updates', 'last-apply.json'), JSON.stringify({ ok: true, version: TARGET, previous: current, at: new Date().toISOString(), mode: MODE }));
   if (MODE !== 'rollback') { try { core.rimraf(SOURCE); } catch (e) { /* ignore */ } }
   try { fs.rmdirSync(path.join(ROOT, 'versions', TARGET)); } catch (e) { /* not empty or absent */ }
-  pruneVersions(TARGET);
+  core.housekeeping(ROOT, { keepVersions: KEEP_VERSIONS, current: TARGET, log });
   log('OK version ' + TARGET + ' en service (precedente conservee: ' + current + ')');
   return 0;
 }

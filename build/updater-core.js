@@ -112,4 +112,33 @@ function extractPackage(buf, destDir) {
   return out.map(f => f.path);
 }
 
-module.exports = { ALLOWED_DIRS, ALLOWED_ROOT_FILES, REPLACED_DIRS, compareVersions, isVersion, sha256, fetchBuffer, verifySignature, isAllowedPath, buildPackage, extractPackage, mkdirp, rimraf };
+// Keeps the install folder lean after an update: only the newest saved versions, no leftovers, small logs.
+function housekeeping(root, opts) {
+  const keep = opts.keepVersions || 2, log = opts.log || function () {};
+  const readJson = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+  const currentVersion = opts.current || (readJson(path.join(root, 'app', 'version.json')) || {}).version || '0.0.0';
+  const removed = [];
+  const drop = target => { try { rimraf(target); removed.push(target); } catch (e) { log('nettoyage impossible: ' + target + ' (' + e.message + ')'); } };
+  const versionsDir = path.join(root, 'versions');
+  if (fs.existsSync(versionsDir)) {
+    const names = fs.readdirSync(versionsDir).filter(n => isVersion(n) && n !== currentVersion).sort((a, b) => compareVersions(b, a));
+    names.slice(keep).forEach(n => drop(path.join(versionsDir, n)));
+    if (fs.existsSync(path.join(versionsDir, currentVersion))) drop(path.join(versionsDir, currentVersion));
+    fs.readdirSync(versionsDir).filter(n => !isVersion(n)).forEach(n => drop(path.join(versionsDir, n)));
+  }
+  const updatesDir = path.join(root, 'updates');
+  if (fs.existsSync(updatesDir)) {
+    for (const n of fs.readdirSync(updatesDir)) {
+      const full = path.join(updatesDir, n), s = /^staged-(\d+\.\d+\.\d+)$/.exec(n);
+      if (s) { if (s[1] !== opts.stagedKeep || compareVersions(s[1], currentVersion) <= 0) drop(full); }
+      else if (/^failed-/.test(n)) { const stamp = Number((n.match(/-(\d{10,})$/) || [])[1] || 0); if (!stamp || Date.now() - stamp > 7 * 86400000) drop(full); }
+    }
+  }
+  const tmp = require('os').tmpdir();
+  try { for (const n of fs.readdirSync(tmp)) if (/^(promedpara-apply-\d+|ppk-(build|test)-[\w]+)$/.test(n)) { const full = path.join(tmp, n); if (Date.now() - fs.statSync(full).mtimeMs > 86400000) drop(full); } } catch (e) { }
+  const logsDir = path.join(root, 'logs');
+  try { for (const n of fs.readdirSync(logsDir)) { const f = path.join(logsDir, n); const st = fs.statSync(f); if (st.isFile() && st.size > 1500000) { const buf = fs.readFileSync(f); fs.writeFileSync(f, buf.slice(buf.length - 200000)); removed.push('journal reduit: ' + n); } } } catch (e) { }
+  if (removed.length) log('nettoyage: ' + removed.length + ' element(s)');
+  return removed;
+}
+module.exports = { housekeeping, ALLOWED_DIRS, ALLOWED_ROOT_FILES, REPLACED_DIRS, compareVersions, isVersion, sha256, fetchBuffer, verifySignature, isAllowedPath, buildPackage, extractPackage, mkdirp, rimraf };

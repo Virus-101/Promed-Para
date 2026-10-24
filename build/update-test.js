@@ -40,7 +40,7 @@ function makeKit(version, tweak) {
   copyDir(path.join(KIT, 'app'), path.join(ROOT, 'app')); copyDir(path.join(KIT, 'runtime'), path.join(ROOT, 'runtime')); copyDir(path.join(KIT, 'tools'), path.join(ROOT, 'tools'));
   copyDir(path.join(KIT, 'electron', 'resources', 'app'), path.join(ROOT, 'electron', 'resources', 'app'));
   core.mkdirp(path.join(ROOT, 'config')); core.mkdirp(DATA);
-  fs.writeFileSync(path.join(ROOT, 'config', 'update.json'), JSON.stringify({ repo: '', baseUrl: 'http://127.0.0.1:' + HTTP_PORT + '/', publicKey, checkEveryHours: 6, nightWindow: '03:00-05:00' }));
+  fs.writeFileSync(path.join(ROOT, 'config', 'update.json'), JSON.stringify({ repo: '', baseUrl: 'http://127.0.0.1:' + HTTP_PORT + '/', publicKey, checkEveryHours: 6, nightWindow: '03:00-05:00', idleMinutes: 0.1 }));
   process.env.PROMEDPARA_APPLY_TEST = '1';
   const installed = readJson(path.join(ROOT, 'app', 'version.json')).version;
 
@@ -65,13 +65,13 @@ function makeKit(version, tweak) {
   served = {};
   await updater.check('test'); ok('no release published: reported, not an error', /Aucune mise/.test(st().message), st());
 
-  // --- good release 2.1.1
-  const good = path.join(T, 'rel-good'); createRelease({ kitDir: makeKit('2.1.1', d => fs.writeFileSync(path.join(d, 'app', 'public', 'new-feature.txt'), 'hello')), outDir: good, version: '2.1.1', notes: 'test' });
+  // --- good release 9.1.1
+  const good = path.join(T, 'rel-good'); createRelease({ kitDir: makeKit('9.1.1', d => fs.writeFileSync(path.join(d, 'app', 'public', 'new-feature.txt'), 'hello')), outDir: good, version: '9.1.1', notes: 'test' });
 
   publish(good, f => { const k = Object.keys(f).find(n => n.endsWith('.ppk')); const b = Buffer.from(f[k]); b[b.length - 5] ^= 1; f[k] = b; });
   await updater.check('test'); ok('tampered package is rejected (checksum)', !st().staged && /ontr|incorrect|invalide|Vérification impossible/.test(st().message), st());
 
-  publish(good, f => { f['latest.json'] = Buffer.from(f['latest.json'].toString().replace('2.1.1', '9.9.9')); });
+  publish(good, f => { f['latest.json'] = Buffer.from(f['latest.json'].toString().replace('9.1.1', '9.9.9')); });
   await updater.check('test'); ok('forged manifest is rejected (signature)', /Signature invalide/.test(st().message) && !st().staged, st());
 
   publish(good, f => { f['latest.json.sig'] = Buffer.from('AAAA'); });
@@ -81,37 +81,61 @@ function makeKit(version, tweak) {
   publish(old); await updater.check('test'); ok('older (replayed) release is ignored: no downgrade', !st().staged && /à jour/.test(st().message), st());
 
   publish(good); await updater.check('test');
-  ok('good signed release is downloaded, verified and staged', st().staged === '2.1.1' && fs.existsSync(path.join(ROOT, 'updates', 'staged-2.1.1', '.ready')), st());
+  ok('good signed release is downloaded, verified and staged', st().staged === '9.1.1' && fs.existsSync(path.join(ROOT, 'updates', 'staged-9.1.1', '.ready')), st());
 
   // --- apply
   fs.writeFileSync(path.join(DATA, 'marker.txt'), 'data must survive');
   ok('apply starts the helper', updater.applyStaged() === true);
-  ok('new version comes up and passes the health check', await waitVersion('2.1.1', 60), await status());
+  ok('new version comes up and passes the health check', await waitVersion('9.1.1', 60), await status());
   ok('new files are in place', fs.existsSync(path.join(ROOT, 'app', 'public', 'new-feature.txt')));
   ok('previous version is kept for rollback', fs.existsSync(path.join(ROOT, 'versions', installed, 'app', 'version.json')));
   ok('database was backed up before the update', fs.readdirSync(path.join(DATA, 'backups')).some(n => /^avant-mise-a-jour-/.test(n)));
   ok('data folder untouched by the update', fs.readFileSync(path.join(DATA, 'marker.txt'), 'utf8') === 'data must survive');
-  for (let i = 0; i < 40 && fs.existsSync(path.join(ROOT, 'updates', 'staged-2.1.1')); i++) await sleep(250);
-  ok('staging folder cleaned up', !fs.existsSync(path.join(ROOT, 'updates', 'staged-2.1.1')));
+  for (let i = 0; i < 40 && fs.existsSync(path.join(ROOT, 'updates', 'staged-9.1.1')); i++) await sleep(250);
+  ok('staging folder cleaned up', !fs.existsSync(path.join(ROOT, 'updates', 'staged-9.1.1')));
 
   // --- manual rollback to the saved version
   ok('rollback helper starts', updater.rollbackTo(installed) === true);
   ok('rollback restores the previous version', await waitVersion(installed, 60), await status());
-  ok('the newer version is saved too (can go forward again)', fs.existsSync(path.join(ROOT, 'versions', '2.1.1', 'app', 'version.json')));
+  ok('the newer version is saved too (can go forward again)', fs.existsSync(path.join(ROOT, 'versions', '9.1.1', 'app', 'version.json')));
   ok('rollback removed the new-feature file', !fs.existsSync(path.join(ROOT, 'app', 'public', 'new-feature.txt')));
 
   // --- broken release must roll itself back
   const bad = path.join(T, 'rel-bad');
-  createRelease({ kitDir: makeKit('2.1.2', d => fs.writeFileSync(path.join(d, 'app', 'main.js'), 'process.exit(3);')), outDir: bad, version: '2.1.2' });
-  publish(bad); await updater.check('test'); ok('broken release is staged (it looks valid)', st().staged === '2.1.2', st());
+  createRelease({ kitDir: makeKit('9.1.2', d => fs.writeFileSync(path.join(d, 'app', 'main.js'), 'process.exit(3);')), outDir: bad, version: '9.1.2' });
+  publish(bad); await updater.check('test'); ok('broken release is staged (it looks valid)', st().staged === '9.1.2', st());
   updater.applyStaged();
   const failFile = path.join(ROOT, 'updates', 'failed.json');
   for (let i = 0; i < 120 && !fs.existsSync(failFile); i++) await sleep(500);
   ok('broken release fails the health check (helper gives its verdict)', fs.existsSync(failFile));
   ok('the till is back on the working version and answering', await waitVersion(installed, 60), await status());
-  ok('the failure is remembered, the broken version will not be retried', JSON.stringify(readJson(path.join(ROOT, 'updates', 'failed.json'))) === '["2.1.2"]');
+  ok('the failure is remembered, the broken version will not be retried', JSON.stringify(readJson(path.join(ROOT, 'updates', 'failed.json'))) === '["9.1.2"]');
   await updater.check('test'); ok('status explains it was ignored', /a échoué/.test(st().message) && !st().staged, st());
   ok('working folders intact after failed update', fs.existsSync(path.join(ROOT, 'app', 'server.bundle.js')) && fs.existsSync(path.join(ROOT, 'tools', 'check.ps1')));
+
+  // --- housekeeping: only what is necessary stays in the install folder
+  for (const v of ['1.0.0', '1.0.1', '1.0.2']) core.mkdirp(path.join(ROOT, 'versions', v));
+  core.mkdirp(path.join(ROOT, 'updates', 'staged-9.9.9')); core.mkdirp(path.join(ROOT, 'updates', 'failed-app-1000000000000')); core.mkdirp(path.join(ROOT, 'updates', 'failed-app-' + Date.now()));
+  const staleTmp = path.join(os.tmpdir(), 'promedpara-apply-111'); core.mkdirp(staleTmp); const twoDaysAgo = new Date(Date.now() - 2 * 86400000); fs.utimesSync(staleTmp, twoDaysAgo, twoDaysAgo);
+  core.mkdirp(path.join(ROOT, 'logs')); fs.writeFileSync(path.join(ROOT, 'logs', 'big.log'), Buffer.alloc(2 * 1024 * 1024, 65));
+  updater.housekeeping();
+  ok('housekeeping keeps only the 2 newest saved versions', JSON.stringify(fs.readdirSync(path.join(ROOT, 'versions')).sort()) === JSON.stringify(['1.0.2', '9.1.1']), fs.readdirSync(path.join(ROOT, 'versions')));
+  ok('housekeeping removes unready staging and old failed leftovers (keeps a fresh failure for inspection)', !fs.existsSync(path.join(ROOT, 'updates', 'staged-9.9.9')) && !fs.existsSync(path.join(ROOT, 'updates', 'failed-app-1000000000000')) && fs.readdirSync(path.join(ROOT, 'updates')).some(n => /^failed-app-\d{13}$/.test(n) && n !== 'failed-app-1000000000000'), fs.readdirSync(path.join(ROOT, 'updates')));
+  ok('housekeeping removes stale temp folders', !fs.existsSync(staleTmp));
+  ok('housekeeping shrinks oversized logs', fs.statSync(path.join(ROOT, 'logs', 'big.log')).size <= 200000);
+  ok('failure memory and last result are never deleted', fs.existsSync(path.join(ROOT, 'updates', 'failed.json')) && fs.existsSync(path.join(ROOT, 'updates', 'last-apply.json')));
+
+  // --- fully automatic: installs by itself once the till has been idle, but never while it is in use
+  const auto = path.join(T, 'rel-auto'); createRelease({ kitDir: makeKit('9.1.3'), outDir: auto, version: '9.1.3' });
+  publish(auto); await updater.check('test'); ok('next release is staged', st().staged === '9.1.3', st());
+  const api = (m, u, b, cookie) => fetch('http://127.0.0.1:' + PORT + u, { method: m, headers: Object.assign({ 'Content-Type': 'application/json' }, cookie ? { Cookie: cookie } : {}), body: b ? JSON.stringify(b) : undefined });
+  const su = await api('POST', '/api/setup', { name: 'Test Owner', username: 'owner', password: 'correct-horse-9' }); const cookie = su.headers.get('set-cookie').split(';')[0];
+  await api('GET', '/api/me', null, cookie);   // activity right now
+  await updater.tick(); await sleep(2500);
+  ok('NOT installed while the till was just used', (await status()).version === installed && st().staged === '9.1.3', await status());
+  await sleep(7000);
+  await updater.tick();
+  ok('installed automatically after the idle time, with nobody pressing anything', await waitVersion('9.1.3', 60), await status());
 
   stopServer(); web.close();
   await sleep(500);

@@ -109,6 +109,17 @@ const totp = (secretHex, step) => {
   ok('low-stock alert raised (4 -> 2, threshold 3)', r.json.lowStock && r.json.lowStock.length === 1, r.json.lowStock);
   r = await owner('GET', '/api/notifications?afterSeq=0'); ok('owner notifications include the sale', r.json.notifications.some(n => /V-\d{4}-\d{5}/.test(n.title + n.body) || /vente/i.test(n.title)), r.json.notifications.map(n => n.title));
 
+  // ---- one-step worker creation ----
+  r = await boss('POST', '/api/team', { name: 'Fatima Zahra', role: 'cashier', generatePin: true, canReceiveStock: true });
+  ok('wizard: worker created from just a name, with a generated 6-digit code and a derived username', r.status === 201 && /^\d{6}$/.test(r.json.pin) && r.json.user.username === 'fatimazahra' && r.json.user.canReceiveStock === true, r);
+  const fatimaPin = r.json.pin;
+  r = await boss('POST', '/api/team', { name: 'Fatima Zahra', role: 'cashier', pin: '864209' }); ok('wizard: same name gets a unique username and keeps the chosen code', r.status === 201 && r.json.user.username === 'fatimazahra2' && r.json.pin === undefined, r);
+  r = await boss('POST', '/api/team', { name: 'Zineb', role: 'cashier', pin: '864209' }); ok('wizard: a code already in use is refused', r.status === 409, r);
+  r = await boss('POST', '/api/team', { name: 'Zineb', role: 'cashier', pin: '12ab' }); ok('wizard: a bad code is refused', r.status === 400, r);
+  r = await boss('GET', '/api/team'); ok('refused attempts leave no half-created account', !r.json.users.some(u => u.name === 'Zineb'), r.json.users.map(u => u.name));
+  const fatima = jar(); r = await fatima('POST', '/api/worker/pin-login', { pin: fatimaPin }); ok('the new worker signs in with the generated code', r.status === 200 && r.json.user.canReceiveStock === true, r);
+  r = await anon('GET', '/api/update/idle'); ok('idle endpoint answers on the till itself', r.status === 200 && typeof r.json.idleSeconds === 'number', r);
+
   // ---- detection of the previous software's export ----
   const legacyDir = path.resolve(__dirname, '..', '..', '_legacytest'); fs.mkdirSync(legacyDir, { recursive: true });
   const legacyCsv = 'Article;Famille;PRIX_A;PRIX_V;Qté;Alert\r\nDOLIPRANE 1G;MEDICAMENTS;12,50;18,00;40;5\r\nSAVON DOUX;HYGIENE;6,00;9,50;12;3\r\n';
@@ -143,9 +154,11 @@ const totp = (secretHex, step) => {
   r = await owner('GET', '/api/team'); ok('team list says who has a PIN but never exposes it', r.json.users.find(u => u.id === sara).has_pin === 1 && !JSON.stringify(r.json).includes('482913') && !JSON.stringify(r.json).includes('pin_hash'), r.json.users.map(u => u.has_pin));
   r = await owner('POST', '/api/team/' + sara + '/pin', { remove: true }); ok('owner removes a PIN', r.status === 200, r);
   r = await anon('POST', '/api/worker/pin-login', { pin: '482913' }); ok('removed PIN no longer works', r.status === 401, r);
+  await new Promise(r => setTimeout(r, 61000));   // let the per-minute rate-limit window pass, so the lockout rule itself is what gets tested
+  const seqBefore = (await owner('GET', '/api/notifications?afterSeq=0')).json.latestSequence;
   for (let i = 0; i < 9; i++) await anon('POST', '/api/worker/pin-login', { pin: '00000' + i });
   r = await anon('POST', '/api/worker/pin-login', { pin: nadiaPin }); ok('PIN entry locks after repeated failures (even for a right PIN)', r.status === 429, r);
-  r = await owner('GET', '/api/notifications?afterSeq=0'); ok('owner is notified of the lockout', r.json.notifications.some(n => /PIN répétées/.test(n.title)), r.json.notifications.map(n => n.title));
+  r = await owner('GET', '/api/notifications?afterSeq=' + seqBefore); ok('owner is notified of the lockout', r.json.notifications.some(n => /PIN répétées/.test(n.title)), r.json.notifications.map(n => n.title));
 
   await new Promise(r => setTimeout(r, 600));
   await stop(); await start();
@@ -158,6 +171,7 @@ const totp = (secretHex, step) => {
   r = await fetch(BASE + '/shop'); ok('/shop page served', r.status === 200);
   r = await fetch(BASE + '/PromedPara-Owner.apk'); const apk = Buffer.from(await r.arrayBuffer()); ok('owner APK downloadable and intact (zip header)', r.status === 200 && apk.length === fs.statSync(path.join(KIT, 'android', 'PromedPara-Owner.apk')).size && apk.slice(0, 2).toString() === 'PK', { status: r.status, len: apk.length });
   await stop();
+  try { fs.rmSync(DATA, { recursive: true, force: true }); } catch (e) { /* scratch data of this test only */ }
   const failed = results.filter(x => !x).length;
   console.log('\n' + (results.length - failed) + '/' + results.length + ' checks passed');
   process.exit(failed ? 1 : 0);

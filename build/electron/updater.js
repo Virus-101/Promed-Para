@@ -14,13 +14,13 @@ function create(options) {
   const commandFile = path.join(dataDir, 'update-command.json');
   const configFile = path.join(root, 'config', 'update.json');
   const updatesDir = path.join(root, 'updates');
-  let busy = false, lastTickCheck = 0, lastNightAttempt = '';
+  let busy = false, lastTickCheck = 0, lastNightAttempt = '', lastIdleAttempt = 0;
 
   const readJson = (file, fallback) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return fallback; } };
   const currentVersion = () => (readJson(path.join(root, 'app', 'version.json'), {}) || {}).version || '0.0.0';
   const config = () => {
     const c = readJson(configFile, {}) || {};
-    return { repo: String(c.repo || '').trim(), baseUrl: c.baseUrl || '', publicKey: c.publicKey || '', checkEveryHours: Number(c.checkEveryHours) || 6, nightWindow: c.nightWindow || '03:00-05:00' };
+    return { repo: String(c.repo || '').trim(), baseUrl: c.baseUrl || '', publicKey: c.publicKey || '', checkEveryHours: Number(c.checkEveryHours) || 6, nightWindow: c.nightWindow || '03:00-05:00', idleMinutes: Number(c.idleMinutes) > 0 ? Number(c.idleMinutes) : 15 };
   };
   const baseUrl = c => (c.baseUrl || ('https://github.com/' + c.repo + '/releases/latest/download/')).replace(/\/?$/, '/');
   const failedList = () => readJson(path.join(updatesDir, 'failed.json'), []);
@@ -87,6 +87,10 @@ function create(options) {
     } finally { busy = false; }
   }
 
+  function housekeeping() {
+    try { const staged = stagedUpdate(); core.housekeeping(root, { keepVersions: 2, current: currentVersion(), stagedKeep: staged ? staged.version : '', log }); } catch (e) { log('nettoyage: ' + e.message); }
+  }
+
   function spawnHelper(extra) {
     const tmp = path.join(os.tmpdir(), 'promedpara-apply-' + Date.now());
     fs.mkdirSync(tmp, { recursive: true });
@@ -111,6 +115,15 @@ function create(options) {
     spawnHelper(['--mode=rollback', '--version=' + version, '--source=' + path.join(root, 'versions', version)]);
     return true;
   }
+  function idleSeconds() {
+    return new Promise(resolve => {
+      const req = require('http').get({ host: '127.0.0.1', port, path: '/api/update/idle', timeout: 2000 }, res => {
+        let body = ''; res.on('data', d => { body += d; });
+        res.on('end', () => { try { resolve(Number(JSON.parse(body).idleSeconds)); } catch (e) { resolve(-1); } });
+      });
+      req.on('error', () => resolve(-1)); req.on('timeout', () => { req.destroy(); resolve(-1); });
+    });
+  }
   function inNightWindow(c) {
     const m = /^(\d\d):(\d\d)-(\d\d):(\d\d)$/.exec(c.nightWindow); if (!m) return false;
     const now = new Date(), mins = now.getHours() * 60 + now.getMinutes(), a = +m[1] * 60 + +m[2], b = +m[3] * 60 + +m[4];
@@ -130,14 +143,19 @@ function create(options) {
     const c = config(), now = Date.now();
     if (now - lastTickCheck > c.checkEveryHours * 3600000) { lastTickCheck = now; await check('planifie'); }
     const day = new Date().toDateString();
-    if (stagedUpdate() && inNightWindow(c) && lastNightAttempt !== day) { lastNightAttempt = day; if (applyStaged()) options.quit(); }
+    if (stagedUpdate() && inNightWindow(c) && lastNightAttempt !== day) { lastNightAttempt = day; if (applyStaged()) options.quit(); return; }
+    // Fully automatic: once an update is ready and nobody has used the till for a while, install it (at most once an hour).
+    if (stagedUpdate() && now - lastIdleAttempt > 3600000) {
+      const idle = await idleSeconds();
+      if (idle >= c.idleMinutes * 60) { lastIdleAttempt = now; log('caisse inactive depuis ' + idle + ' s : installation automatique'); if (applyStaged()) options.quit(); }
+    }
   }
 
   return {
     // Called before the cashier window opens: an already downloaded update is installed right away.
     applyAtStart() { return applyStaged(); },
-    start() { setStatus({}); setTimeout(() => { lastTickCheck = Date.now(); check('demarrage'); }, 20000); setInterval(() => { tick().catch(e => log('tick: ' + e.message)); }, 10000); },
-    check, applyStaged, rollbackTo, setStatus
+    start() { housekeeping(); setStatus({}); setTimeout(() => { lastTickCheck = Date.now(); check('demarrage'); }, 20000); setInterval(() => { tick().catch(e => log('tick: ' + e.message)); }, 10000); },
+    check, applyStaged, rollbackTo, setStatus, tick, housekeeping
   };
 }
 

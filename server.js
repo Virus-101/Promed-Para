@@ -143,6 +143,13 @@ const checkNewPin = (pin, exceptId) => {
 };
 const RECOVERY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const newRecoveryKey = () => { const bytes = randomBytes(16); let key = ''; for (let i = 0; i < 16; i++) { key += RECOVERY_ALPHABET[bytes[i] % 32]; if (i % 4 === 3 && i < 15) key += '-'; } return key; };
+const uniqueUsername = name => {
+  let base = String(name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 14);
+  if (base.length < 3) base = 'employe';
+  let candidate = base, n = 1;
+  while (db.prepare('SELECT 1 FROM users WHERE username=?').get(candidate)) candidate = base + (++n);
+  return candidate;
+};
 const normRecovery = key => String(key || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const isAdmin = userId => Boolean(accountFlags(userId).is_admin);
 const userSafe = user => { const flags = accountFlags(user.id); return { id: user.id, name: user.name, username: user.username, role: user.role, canReceiveStock: Boolean(user.can_receive_stock), canAddProducts: user.role !== 'owner' && productAccess(user.id), isAdmin: Boolean(flags.is_admin), mustChangePassword: Boolean(flags.must_change_password), hasPin: Boolean(flags.has_pin), mustSetPin: user.role === 'owner' && (Boolean(flags.must_change_password) || !flags.has_pin) }; };
@@ -173,6 +180,7 @@ const currentUser = request => {
 const requireUser = request => {
   const user = currentUser(request);
   if (!user || !user.active) throw new HttpError(401, 'Connectez-vous pour continuer.');
+  lastActivityAt = Date.now();
   return user;
 };
 const requireOwner = request => {
@@ -236,6 +244,7 @@ const ownerUrls = () => ['127.0.0.1','localhost','::1'].includes(HOST) ? [] : Ob
 const attemptWindows = new Map();
 let pinFailures = [];
 let recoveryFailures = [];
+let lastActivityAt = Date.now();
 function rateLimit(request, action, max = 12, windowMs = 60_000) {
   const key = `${action}:${request.socket.remoteAddress || 'unknown'}`;
   const now = Date.now(), recent = (attemptWindows.get(key) || []).filter(at => now - at < windowMs);
@@ -453,6 +462,11 @@ async function api(request, response, url) {
   if (route === '/api/logout' && request.method === 'POST') {
     sessions.delete(cookieToken(request));
     return send(response, 200, { ok: true }, { 'Set-Cookie': 'pp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+  }
+  if (route === '/api/update/idle' && request.method === 'GET') {
+    // Used by the till's own app to know when nobody has touched the till for a while. Loopback only.
+    if (!isLoopback(request.socket.remoteAddress)) throw new HttpError(403, 'Réservé à la caisse.');
+    return send(response, 200, { idleSeconds: Math.round((Date.now() - lastActivityAt) / 1000) });
   }
   if (route === '/api/update/status' && request.method === 'GET') {
     requireOwner(request);
@@ -798,15 +812,22 @@ async function api(request, response, url) {
     return send(response,200,{users});
   }
   if (route === '/api/team' && request.method === 'POST') {
-    const actor=requireOwner(request); const b=await readBody(request), name=clean(b.name,90), username=clean(b.username,50).toLowerCase(), role=b.role==='owner'?'owner':'cashier', password=String(b.password||'');
+    const actor=requireOwner(request); const b=await readBody(request), name=clean(b.name,90), username0=clean(b.username,50).toLowerCase(), role=b.role==='owner'?'owner':'cashier', password=String(b.password||'');
+    const username=username0.length>=3?username0:uniqueUsername(name);
     if(role==='owner'&&!isAdmin(actor.id))throw new HttpError(403,'Seul l’administrateur peut créer un compte propriétaire.');
     if(name.length<2||username.length<3||(password&&password.length<10))throw new HttpError(400,'Nom et identifiant (3+) requis; un mot de passe propriétaire doit contenir au moins 10 caractères.');
     const user={id:id('user'),name,username,role,password_hash:passwordHash(password||randomBytes(40).toString('base64url')),active:1,created_at:isoNow()};
+    const askedPin = String(b.pin || '').trim();
+    const workerPinGenerated = role === 'cashier' && !askedPin && Boolean(b.generatePin);
+    const workerPin = role === 'cashier' && (askedPin || b.generatePin) ? (askedPin || randomPin(user.id)) : '';
+    if (workerPin) checkNewPin(workerPin, user.id);
     db.prepare('INSERT INTO users(id,name,username,role,password_hash,active,created_at,must_change_password) VALUES(?,?,?,?,?,?,?,?)').run(user.id,user.name,user.username,user.role,user.password_hash,user.active,user.created_at,role==='owner'?1:0);
+    if (workerPin) db.prepare('UPDATE users SET pin_hash=? WHERE id=?').run(passwordHash(workerPin), user.id);
+    if (role === 'cashier' && b.canReceiveStock) { db.prepare('UPDATE users SET can_receive_stock=1 WHERE id=?').run(user.id); user.can_receive_stock = 1; }
     let tempPin;
     if (role === 'owner' && !password) { tempPin = randomPin(user.id); db.prepare('UPDATE users SET pin_hash=? WHERE id=?').run(passwordHash(tempPin), user.id); }
     createNotification('Compte créé',`${name} · ${role==='owner'?'propriétaire (code temporaire)':'employé'} · par ${actor.name}`,'security');
-    return send(response,201,{user:userSafe(user),tempPin});
+    return send(response,201,{user:userSafe(user),tempPin,pin:workerPinGenerated?workerPin:undefined});
   }
   if (route === '/api/events' && request.method === 'GET') {
     requireOwner(request); response.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','Connection':'keep-alive','X-Accel-Buffering':'no'}); eventClients.add(response); const sequence=Number(db.prepare('SELECT COALESCE(MAX(rowid),0) AS n FROM notifications').get().n); response.write(`data: ${JSON.stringify({type:'ready',sequence})}\n\n`);

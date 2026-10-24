@@ -114,7 +114,7 @@
 
 <div class="step"><h2><span class="num">7</span>Create a worker and pair the phone</h2>
 <ol>
-<li>Owner (or admin): <span class="fr">Comptes équipe</span> &rarr; <span class="fr">Créer un compte</span> &rarr; role <span class="fr">Employé</span>, leave the password empty.</li>
+<li>Owner (or admin): <span class="fr">Comptes équipe</span> &rarr; <span class="fr">＋ Ajouter un employé</span>. Type only the name. Leave the code empty to have a 6-digit code generated (it is shown <b>once</b>: write it down and tell the worker), or type your own 6 digits. Tick <span class="fr">Peut réceptionner les livraisons</span> if needed. That is all: the worker can open the till right away with the code.</li>
 <li>On that worker's card touch <span class="fr">Associer un téléphone</span>. A 12-character code appears (valid 5 minutes, once) with the till address and the app download link.</li>
 <li>On the worker's Android phone (same Wi-Fi): open the download link, install <b>PromedPara Worker</b> (allow "install from this source" if Android asks), enter the till address and the code.</li>
 <li>The phone now shows a barcode that changes every 30 seconds.</li>
@@ -157,12 +157,12 @@
 </ul></div>
 
 <div class="step"><h2><span class="num">12</span>Automatic updates from GitHub (with backup versions)</h2>
-<p>Updates are published by you on a free public GitHub repository. The till checks it every 6 hours, downloads a small signed package (about 3 MB), and installs it <b>between 03:00 and 05:00</b>, at the next start, or right away when an owner presses <span class="fr">Installer maintenant</span> (<span class="fr">Matériel</span> &rarr; <span class="fr">Mises à jour</span>).</p>
+<p>Updates are published by you on a free public GitHub repository. The till checks it every 6 hours, downloads a small signed package (about 3 MB), and installs it <b>by itself, with nobody pressing anything</b>: as soon as the till has not been used for 15 minutes, otherwise between 03:00 and 05:00 or at the next start. An owner can also install right away by pressing <span class="fr">Installer maintenant</span> (<span class="fr">Matériel</span> &rarr; <span class="fr">Mises à jour</span>).</p>
 <h3>Why it is safe</h3>
 <ul>
 <li>Every update is <b>signed with a private key that only you have</b>. The till refuses anything not signed by it, even if someone took over your GitHub account.</li>
 <li>Before installing, the till <b>copies the database</b>. The sales, products and accounts are never part of an update.</li>
-<li>The previous <b>3 versions are kept on the till</b>. <span class="fr">Matériel</span> &rarr; <span class="fr">Versions de secours</span> &rarr; <span class="fr">Revenir à cette version</span> goes back in about 30 seconds.</li>
+<li>After each update the folder is <b>tidied automatically</b>: only the running version and the <b>2 most recent previous versions</b> stay on the till; download leftovers, failed attempts, temporary files and oversized logs are deleted. The previous <b>versions kept on the till</b>. <span class="fr">Matériel</span> &rarr; <span class="fr">Versions de secours</span> &rarr; <span class="fr">Revenir à cette version</span> goes back in about 30 seconds.</li>
 <li>If a new version does not start correctly within 90 seconds, the till <b>goes back to the working version by itself</b> and never retries that broken version.</li>
 <li>Old versions also stay on GitHub (Releases), so you can always publish an older one again.</li>
 </ul>
