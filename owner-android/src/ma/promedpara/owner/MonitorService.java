@@ -39,10 +39,11 @@ public final class MonitorService extends Service {
     @Override public IBinder onBind(Intent intent){return null;}
     @Override public void onDestroy(){running=false;if(worker!=null)worker.interrupt();if(currentConnection!=null)currentConnection.disconnect();((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).cancel(FOREGROUND_ID);super.onDestroy();}
 
+    private int smallIcon(){int id=getResources().getIdentifier("ic_stat_promed","drawable",getPackageName());return id!=0?id:android.R.drawable.ic_dialog_info;}
     private void createChannels(){if(Build.VERSION.SDK_INT<26)return;NotificationManager m=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);m.createNotificationChannel(new NotificationChannel(CHANNEL_MONITOR,"Surveillance PromedPara",NotificationManager.IMPORTANCE_LOW));m.createNotificationChannel(new NotificationChannel(CHANNEL_ALERTS,"Alertes PromedPara",NotificationManager.IMPORTANCE_HIGH));}
-    private Notification monitorNotification(String message){Intent open=new Intent(this,MainActivity.class);PendingIntent pending=PendingIntent.getActivity(this,1,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL_MONITOR):new Notification.Builder(this);return b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("PromedPara · surveillance locale").setContentText(message).setContentIntent(pending).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE).build();}
+    private Notification monitorNotification(String message){Intent open=new Intent(this,MainActivity.class);PendingIntent pending=PendingIntent.getActivity(this,1,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL_MONITOR):new Notification.Builder(this);return b.setSmallIcon(smallIcon()).setContentTitle("PromedPara · surveillance locale").setContentText(message).setContentIntent(pending).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE).build();}
     private void setStatus(String value){NotificationManager m=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);m.notify(FOREGROUND_ID,monitorNotification(value));}
-    private void alert(String title,String body,long sequence){NotificationManager m=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);Intent open=new Intent(this,MainActivity.class);PendingIntent pending=PendingIntent.getActivity(this,(int)(sequence%1000000),open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL_ALERTS):new Notification.Builder(this);m.notify(2000+(int)(sequence%1000000),b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title).setContentText(body).setStyle(new Notification.BigTextStyle().bigText(body)).setAutoCancel(true).setContentIntent(pending).build());}
+    private void alert(String title,String body,long sequence){NotificationManager m=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);Intent open=new Intent(this,MainActivity.class);PendingIntent pending=PendingIntent.getActivity(this,(int)(sequence%1000000),open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL_ALERTS):new Notification.Builder(this);m.notify(2000+(int)(sequence%1000000),b.setSmallIcon(smallIcon()).setContentTitle(title).setContentText(body).setStyle(new Notification.BigTextStyle().bigText(body)).setAutoCancel(true).setContentIntent(pending).build());}
     private void broadcastRefresh(){Intent i=new Intent(MainActivity.ACTION_EVENT);i.setPackage(getPackageName());i.putExtra("refresh",true);sendBroadcast(i);}
 
     private void watch(){
@@ -52,7 +53,8 @@ public final class MonitorService extends Service {
                 String base=prefs.getString("server","").replaceAll("/+$","");String cookie=prefs.getString("cookie","");
                 connection=(HttpURLConnection)new URL(base+"/api/events").openConnection();currentConnection=connection;connection.setRequestMethod("GET");connection.setConnectTimeout(9000);connection.setReadTimeout(70000);connection.setRequestProperty("Accept","text/event-stream");connection.setRequestProperty("Cookie",cookie);connection.setRequestProperty("Cache-Control","no-cache");
                 int status=connection.getResponseCode();
-                if(status==401||status==403){alert("Reconnectez-vous à PromedPara","Votre session a expiré. Ouvrez l’application et connectez-vous à nouveau.",System.currentTimeMillis());prefs.edit().putBoolean("monitoring",false).remove("cookie").apply();running=false;broadcastRefresh();break;}
+                if((status==401||status==403)&&MainActivity.refreshSession(prefs)){setStatus("Session renouvelée · reconnexion…");continue;}
+                if(status==401||status==403){alert("Reconnectez-vous à PromedPara","Ce téléphone n’est plus associé à la caisse. Ouvrez l’application et associez-le à nouveau.",System.currentTimeMillis());prefs.edit().putBoolean("monitoring",false).remove("cookie").apply();running=false;broadcastRefresh();break;}
                 if(status<200||status>=300)throw new Exception("HTTP "+status);
                 setStatus("Connecté au poste · écoute des événements");
                 try(BufferedReader reader=new BufferedReader(new InputStreamReader(connection.getInputStream(),StandardCharsets.UTF_8))){
@@ -79,7 +81,7 @@ public final class MonitorService extends Service {
         try{
             String base=prefs.getString("server","").replaceAll("/+$","");String cookie=prefs.getString("cookie","");
             for(int page=0;page<10&&running;page++){
-                long after=prefs.getLong("last_seq",0);MainActivity.Result result=MainActivity.request(base+"/api/notifications?afterSeq="+after,"GET",cookie,null);
+                long after=prefs.getLong("last_seq",0);MainActivity.Result result=MainActivity.requestAuthed(prefs,"/api/notifications?afterSeq="+after,"GET",null);
                 JSONObject json=new JSONObject(result.body);if(result.status<200||result.status>=300)throw new Exception("Notification sync failed");JSONArray list=json.optJSONArray("notifications");if(list==null||list.length()==0)break;
                 for(int i=0;i<list.length();i++){JSONObject n=list.optJSONObject(i);handleNotification(n);}
                 if(list.length()<500)break;

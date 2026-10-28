@@ -109,6 +109,32 @@ const totp = (secretHex, step) => {
   ok('low-stock alert raised (4 -> 2, threshold 3)', r.json.lowStock && r.json.lowStock.length === 1, r.json.lowStock);
   r = await owner('GET', '/api/notifications?afterSeq=0'); ok('owner notifications include the sale', r.json.notifications.some(n => /V-\d{4}-\d{5}/.test(n.title + n.body) || /vente/i.test(n.title)), r.json.notifications.map(n => n.title));
 
+  // ---- owner phone pairing (Android owner app) ----
+  r = await owner('GET', '/api/me'); const adminId = r.json.user.id;
+  r = await cashier('POST', '/api/team/' + bossId + '/owner-pairing'); ok('a worker cannot create an owner pairing code', r.status === 403 || r.status === 401, r);
+  r = await boss('POST', '/api/team/' + adminId + '/owner-pairing'); ok('an owner cannot pair a phone to the admin account', r.status === 403, r);
+  r = await boss('POST', '/api/team/' + bossId + '/owner-pairing'); ok('an owner can pair a phone to their own account', r.status === 201 && /^[A-F0-9]{12}$/.test(r.json.code) && r.json.kind === 'owner', r);
+  const phoneCode = r.json.code;
+  r = await anon('POST', '/api/owner/enroll', { code: 'AAAAAAAAAAAA' }); ok('wrong pairing code refused', r.status === 401, r);
+  const ownerPhone = jar(); r = await ownerPhone('POST', '/api/owner/enroll', { code: phoneCode.slice(0, 4) + '-' + phoneCode.slice(4), deviceName: 'Pixel de test' });
+  ok('phone enrolls (dashes tolerated) and gets a long device token + a session', r.status === 201 && /^[a-f0-9]{64}$/.test(r.json.deviceToken) && r.json.user.role === 'owner', r);
+  const deviceToken = r.json.deviceToken;
+  r = await ownerPhone('GET', '/api/overview'); ok('the enrolment session can read the owner dashboard', r.status === 200, r);
+  r = await anon('POST', '/api/owner/enroll', { code: phoneCode }); ok('a pairing code works only once', r.status === 401, r);
+  const ownerPhone2 = jar(); r = await ownerPhone2('POST', '/api/owner/device-login', { deviceToken }); ok('device token signs the phone in later without any code or password', r.status === 200 && r.json.user.role === 'owner', r);
+  r = await ownerPhone2('GET', '/api/overview'); ok('device-login session works', r.status === 200, r);
+  r = await anon('POST', '/api/owner/device-login', { deviceToken: 'a'.repeat(64) }); ok('unknown token refused', r.status === 401, r);
+  r = await anon('POST', '/api/owner/device-login', { deviceToken: 'nonsense' }); ok('malformed token refused', r.status === 401, r);
+  r = await boss('GET', '/api/team'); const bossCard = r.json.users.find(u => u.id === bossId);
+  ok('the team list shows the paired phone (and never its token)', bossCard.devices.length === 1 && bossCard.devices[0].name === 'Pixel de test' && !JSON.stringify(r.json).includes(deviceToken), bossCard.devices);
+  const oneDevice = bossCard.devices[0].id;
+  r = await cashier('DELETE', '/api/owner/devices/' + oneDevice); ok('a worker cannot revoke a phone', r.status === 403 || r.status === 401, r);
+  r = await owner('DELETE', '/api/owner/devices/' + oneDevice); ok('the admin can revoke an owner phone', r.status === 200, r);
+  r = await anon('POST', '/api/owner/device-login', { deviceToken }); ok('a revoked phone can no longer sign in', r.status === 401, r);
+  r = await boss('POST', '/api/team/' + bossId + '/owner-pairing'); const code2 = r.json.code; r = await jar()('POST', '/api/owner/enroll', { code: code2, deviceName: 'Second' }); const token2 = r.json.deviceToken;
+  r = await anon('POST', '/api/owner/device-logout', { deviceToken: token2 }); ok('logging out of the app deactivates the phone on the till', r.status === 200, r);
+  r = await anon('POST', '/api/owner/device-login', { deviceToken: token2 }); ok('...and its token stops working', r.status === 401, r);
+
   // ---- one-step worker creation ----
   r = await boss('POST', '/api/team', { name: 'Fatima Zahra', role: 'cashier', generatePin: true, canReceiveStock: true });
   ok('wizard: worker created from just a name, with a generated 6-digit code and a derived username', r.status === 201 && /^\d{6}$/.test(r.json.pin) && r.json.user.username === 'fatimazahra' && r.json.user.canReceiveStock === true, r);

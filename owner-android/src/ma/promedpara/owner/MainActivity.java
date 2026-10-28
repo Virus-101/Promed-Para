@@ -10,8 +10,8 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
@@ -20,6 +20,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -34,17 +35,18 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     static final String PREFS = "promedpara_owner";
     static final String ACTION_EVENT = "ma.promedpara.owner.EVENT";
-    private static final int GREEN = Color.rgb(23, 61, 44), GREEN_BRIGHT = Color.rgb(20, 125, 82), BG = Color.rgb(245, 247, 243), INK = Color.rgb(25, 48, 36), MUTED = Color.rgb(94, 110, 100), LINE = Color.rgb(220, 229, 220);
+    private static final int GREEN = Color.rgb(23, 61, 44), GREEN_BRIGHT = Color.rgb(20, 125, 82), BG = Color.rgb(245, 247, 243), INK = Color.rgb(25, 48, 36), MUTED = Color.rgb(94, 110, 100), LINE = Color.rgb(220, 229, 220), SOFT = Color.rgb(194, 222, 202);
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private SharedPreferences prefs;
     private JSONArray currentSuppliers;
-    private EditText serverField, usernameField, passwordField;
+    private EditText serverField, codeField;
     private LinearLayout root;
     private boolean receiverRegistered;
     private final BroadcastReceiver eventReceiver = new BroadcastReceiver() {
@@ -56,7 +58,7 @@ public final class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         getWindow().setStatusBarColor(BG); getWindow().setNavigationBarColor(BG);
         if (Build.VERSION.SDK_INT >= 23) getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
-        if (prefs.getString("cookie", "").isEmpty()) showLogin(); else verifySession();
+        if (prefs.getString("cookie", "").isEmpty() && prefs.getString("deviceToken", "").isEmpty()) showLogin(); else verifySession();
     }
 
     @Override protected void onStart() {
@@ -80,13 +82,28 @@ public final class MainActivity extends Activity {
     private void pad(View v, int left, int top, int right, int bottom) { v.setPadding(dp(left),dp(top),dp(right),dp(bottom)); }
     private TextView label(String s) { TextView t=text(s,13,MUTED,true); t.setPadding(0,dp(14),0,dp(6)); return t; }
 
-    private void begin(String eyebrow, String title, String subtitle) {
+    // ---- icons and logo come from resources generated from the Lucide set and the Promed logo
+    private int res(String name, String type) { return getResources().getIdentifier(name, type, getPackageName()); }
+    private Drawable icon(String name, int sizeDp, int color) {
+        int id = res("ic_" + name, "drawable"); if (id == 0) return null;
+        Drawable d = getResources().getDrawable(id, getTheme()).mutate(); d.setTint(color); d.setBounds(0, 0, dp(sizeDp), dp(sizeDp)); return d;
+    }
+    private void withIcon(TextView v, String name, int sizeDp, int color, int gapDp) {
+        Drawable d = icon(name, sizeDp, color); if (d == null) return;
+        v.setCompoundDrawablesRelative(d, null, null, null); v.setCompoundDrawablePadding(dp(gapDp)); v.setGravity(Gravity.CENTER_VERTICAL);
+    }
+    private ImageView iconView(String name, int sizeDp, int color) { ImageView v = new ImageView(this); Drawable d = icon(name, sizeDp, color); if (d != null) v.setImageDrawable(d); return v; }
+    private ImageView logoView(String name) { ImageView v = new ImageView(this); int id = res(name, "drawable"); if (id != 0) v.setImageResource(id); v.setAdjustViewBounds(true); v.setScaleType(ImageView.ScaleType.FIT_CENTER); return v; }
+    private String appVersion() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
+
+    private void begin(String eyebrow, String title, String subtitle, boolean hero) {
         root = column(); root.setBackgroundColor(BG);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.addView(root);
         setContentView(scroll);
-        LinearLayout header = column(); pad(header,22,26,22,18); header.setBackgroundColor(GREEN);
-        TextView brand = text("✚  PROMEDPARA  ·  ERRACHIDIA",12,Color.rgb(194,222,202),true); header.addView(brand);
-        TextView small = text(eyebrow.toUpperCase(),11,Color.rgb(194,222,202),true); LinearLayout.LayoutParams sm=lp(-2,-2); sm.topMargin=dp(26); header.addView(small,sm);
+        LinearLayout header = column(); pad(header,22,hero?30:24,22,18); header.setBackgroundColor(GREEN);
+        if (hero) { header.addView(logoView("logo_full_light"), lp(150,-2)); }
+        else { LinearLayout brand = row(); brand.addView(logoView("logo_mark_light"), lp(40,-2)); TextView name = text("PROMED  ·  PARAPHARMACIE",12,SOFT,true); name.setPadding(dp(11),0,0,0); name.setLetterSpacing(.06f); brand.addView(name); header.addView(brand); }
+        TextView small = text(eyebrow.toUpperCase(),11,SOFT,true); LinearLayout.LayoutParams sm=lp(-2,-2); sm.topMargin=dp(hero?22:26); header.addView(small,sm);
         TextView h=text(title,30,Color.WHITE,true); LinearLayout.LayoutParams hp=lp(-1,-2); hp.topMargin=dp(4); header.addView(h,hp);
         TextView sub=text(subtitle,14,Color.rgb(223,235,224),false); LinearLayout.LayoutParams sp=lp(-1,-2); sp.topMargin=dp(5); header.addView(sub,sp);
         root.addView(header);
@@ -96,39 +113,44 @@ public final class MainActivity extends Activity {
         EditText e = new EditText(this); e.setSingleLine(true); e.setTextSize(16); e.setHint(hint); e.setInputType(inputType); e.setTextColor(INK); e.setHintTextColor(MUTED); e.setBackground(shape(Color.WHITE,LINE,11)); pad(e,13,2,13,2); return e;
     }
 
-    private Button button(String title, boolean primary, Runnable action) {
-        Button b = new Button(this); b.setText(title); b.setTextSize(15); b.setAllCaps(false); b.setTypeface(Typeface.DEFAULT,Typeface.BOLD); b.setTextColor(primary?Color.WHITE:GREEN); b.setBackground(shape(primary?GREEN_BRIGHT:Color.WHITE,primary?0:LINE,12)); b.setMinHeight(dp(54)); b.setPadding(dp(13),dp(5),dp(13),dp(5)); b.setOnClickListener(v -> action.run()); return b;
+    private Button button(String title, boolean primary, String iconName, Runnable action) {
+        Button b = new Button(this); b.setText(title); b.setTextSize(15); b.setAllCaps(false); b.setTypeface(Typeface.DEFAULT,Typeface.BOLD); int fg = primary?Color.WHITE:GREEN; b.setTextColor(fg); b.setBackground(shape(primary?GREEN_BRIGHT:Color.WHITE,primary?0:LINE,12)); b.setMinHeight(dp(54)); b.setPadding(dp(13),dp(5),dp(13),dp(5)); b.setOnClickListener(v -> action.run());
+        if (iconName != null) { Drawable d = icon(iconName, 19, fg); if (d != null) { b.setCompoundDrawablesRelative(d, null, null, null); b.setCompoundDrawablePadding(dp(9)); b.setPadding(dp(22),dp(5),dp(22),dp(5)); } }
+        return b;
     }
 
+    // ---- pairing (replaces the old username + password sign-in: owners have a 6-digit code on the till, not a password)
     private void showLogin() {
-        begin("Propriétaire", "Votre boutique,\nen direct.", "Connectez-vous au poste de caisse sur le Wi‑Fi de la boutique.");
+        begin("Propriétaire", "Votre boutique,\nen direct.", "Associez ce téléphone au poste de caisse, sur le Wi‑Fi de la boutique.", true);
         LinearLayout card=column(); pad(card,19,15,19,19); card.setBackground(shape(Color.WHITE,LINE,17));
-        LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(28)); root.addView(card,cp);
+        LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);
         card.addView(label("ADRESSE DU POSTE DE CAISSE"));
         serverField=field("http://192.168.1.10:4173",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI); serverField.setText(prefs.getString("server","")); card.addView(serverField,lp(-1,54));
-        TextView note=text("Sur la page de téléchargement, copiez l’adresse locale affichée.",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
-        card.addView(label("IDENTIFIANT PROPRIÉTAIRE")); usernameField=field("Votre identifiant",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PERSON_NAME); usernameField.setText(prefs.getString("username","")); card.addView(usernameField,lp(-1,54));
-        card.addView(label("MOT DE PASSE")); passwordField=field("Votre mot de passe",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD); card.addView(passwordField,lp(-1,54));
-        Button login=button("Se connecter",true,this::login); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(login,bp);
-        TextView foot=text("Données et base SQLite conservées sur le poste. Connexion locale uniquement.",12,MUTED,false); foot.setGravity(Gravity.CENTER); LinearLayout.LayoutParams fp=lp(-1,-2); fp.setMargins(dp(28),0,dp(28),dp(22)); root.addView(foot,fp);
+        TextView note=text("Affichée par la caisse, dans la fenêtre « Associer le téléphone ».",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
+        card.addView(label("CODE D’ASSOCIATION (12 CARACTÈRES)")); codeField=field("XXXX XXXX XXXX",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); codeField.setLetterSpacing(.12f); card.addView(codeField,lp(-1,56));
+        Button pair=button("Associer ce téléphone",true,"smartphone",this::pair); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
+        LinearLayout steps=column(); pad(steps,19,14,19,14); steps.setBackground(shape(Color.rgb(233,243,236),0,14)); LinearLayout.LayoutParams stp=lp(-1,-2); stp.setMargins(dp(16),0,dp(16),dp(12)); root.addView(steps,stp);
+        TextView st=text("Comment obtenir le code ?",13,INK,true); steps.addView(st);
+        TextView how=text("Sur la caisse : Comptes équipe → votre fiche → « Associer le téléphone ». Le code est valable cinq minutes et ne sert qu’une fois. Ensuite le téléphone reste associé : plus besoin de code ni de mot de passe.",12,MUTED,false); how.setLineSpacing(dp(3),1f); LinearLayout.LayoutParams hw=lp(-1,-2); hw.topMargin=dp(5); steps.addView(how,hw);
+        TextView foot=text("Données et base SQLite conservées sur le poste. Connexion locale uniquement.  ·  Version "+appVersion(),12,MUTED,false); foot.setGravity(Gravity.CENTER); LinearLayout.LayoutParams fp=lp(-1,-2); fp.setMargins(dp(28),dp(6),dp(28),dp(22)); root.addView(foot,fp);
     }
 
-    private void login() {
-        String base=normalize(serverField.getText().toString()), user=usernameField.getText().toString().trim(), pass=passwordField.getText().toString();
-        if(base.isEmpty() || user.isEmpty() || pass.isEmpty()){toast("Entrez l’adresse du poste, l’identifiant et le mot de passe.");return;}
-        prefs.edit().putString("server",base).putString("username",user).apply();
+    private void pair() {
+        String base=normalize(serverField.getText().toString()), code=codeField.getText().toString().toUpperCase(Locale.ROOT).replaceAll("[^A-F0-9]","");
+        if(base.isEmpty() || code.length()!=12){toast("Entrez l’adresse du poste et le code d’association à 12 caractères.");return;}
+        prefs.edit().putString("server",base).apply();
         setBusy(true);
         io.execute(() -> {
             try {
-                JSONObject body=new JSONObject().put("username",user).put("password",pass);
-                Result result=request(base+"/api/login","POST",null,body.toString());
+                JSONObject body=new JSONObject().put("code",code).put("deviceName",Build.MANUFACTURER+" "+Build.MODEL);
+                Result result=request(base+"/api/owner/enroll","POST",null,body.toString());
                 JSONObject json=new JSONObject(result.body);
-                if(result.status<200||result.status>=300) throw new Exception(json.optString("error","Connexion impossible."));
+                if(result.status<200||result.status>=300) throw new Exception(json.optString("error","Association impossible."));
                 JSONObject account=json.getJSONObject("user");
                 if(!"owner".equals(account.optString("role"))) throw new Exception("Ce compte n’a pas les droits propriétaire.");
-                String cookie=result.cookie;
-                if(cookie.isEmpty()) throw new Exception("Le poste n’a pas renvoyé de session de connexion.");
-                prefs.edit().putString("cookie",cookie).putString("ownerName",account.optString("name","Propriétaire")).putBoolean("monitoring",false).remove("last_seq").apply();
+                String token=json.optString("deviceToken","");
+                if(token.isEmpty()||result.cookie.isEmpty()) throw new Exception("Réponse inattendue du poste.");
+                prefs.edit().putString("cookie",result.cookie).putString("deviceToken",token).putString("ownerName",account.optString("name","Propriétaire")).putBoolean("monitoring",false).remove("last_seq").apply();
                 runOnUiThread(() -> { setBusy(false); hideKeyboard(); showDashboard(null); });
             } catch(Exception e) { runOnUiThread(() -> {setBusy(false);toast(message(e));}); }
         });
@@ -136,43 +158,49 @@ public final class MainActivity extends Activity {
 
     private void verifySession() {
         io.execute(() -> {
-            try { Result r=request(prefs.getString("server","")+"/api/me","GET",prefs.getString("cookie",""),null); JSONObject j=new JSONObject(r.body); if(r.status<200||r.status>=300||!"owner".equals(j.optJSONObject("user").optString("role")))throw new Exception("Session expirée"); runOnUiThread(() -> showDashboard(null)); }
-            catch(Exception e){prefs.edit().remove("cookie").putBoolean("monitoring",false).apply();runOnUiThread(this::showLogin);}
+            try {
+                Result r=requestAuthed(prefs,"/api/me","GET",null);
+                if(r.status==401||r.status==403){ prefs.edit().remove("cookie").remove("deviceToken").putBoolean("monitoring",false).apply(); runOnUiThread(this::showLogin); return; }
+                runOnUiThread(() -> showDashboard(null));
+            } catch(Exception offline) { runOnUiThread(() -> showDashboard(null)); }   // poste injoignable : on garde l’association, le tableau de bord propose « Réessayer »
         });
     }
 
     private void showDashboard(JSONObject data) {
         String name=prefs.getString("ownerName","Propriétaire");
-        begin("Vue propriétaire", "Bonjour, "+name+".", "Résumé et alertes du poste PromedPara.");
+        begin("Vue propriétaire", "Bonjour, "+name+".", "Résumé et alertes du poste PromedPara.", false);
         LinearLayout area=column(); pad(area,16,17,16,28); root.addView(area);
-        if(data==null){TextView loading=text("Chargement des ventes et du stock…",14,MUTED,false);area.addView(loading);Button retry=button("Réessayer",true,this::loadDashboard);LinearLayout.LayoutParams rp=lp(-1,54);rp.topMargin=dp(12);area.addView(retry,rp);Button logout=button("Déconnexion",false,this::logout);LinearLayout.LayoutParams op=lp(-1,52);op.topMargin=dp(8);area.addView(logout,op);loadDashboard();return;}
+        if(data==null){TextView loading=text("Chargement des ventes et du stock…",14,MUTED,false);withIcon(loading,"activity",18,MUTED,8);area.addView(loading);Button retry=button("Réessayer",true,"refresh_cw",this::loadDashboard);LinearLayout.LayoutParams rp=lp(-1,54);rp.topMargin=dp(12);area.addView(retry,rp);Button logout=button("Déconnexion",false,"log_out",this::logout);LinearLayout.LayoutParams op=lp(-1,52);op.topMargin=dp(8);area.addView(logout,op);loadDashboard();return;}
         LinearLayout metrics=row(); area.addView(metrics);
-        addMetric(metrics,"VENTES AUJOURD’HUI",money(data.optLong("revenueCents")),data.optInt("salesCount")+" ticket(s)",true);
-        addMetric(metrics,"PRODUITS",String.valueOf(data.optInt("productCount")),data.optJSONArray("lowStock")==null?"Catalogue":"Stock local",false);
+        addMetric(metrics,"VENTES AUJOURD’HUI",money(data.optLong("revenueCents")),data.optInt("salesCount")+" ticket(s)",true,"trending_up");
+        addMetric(metrics,"PRODUITS",String.valueOf(data.optInt("productCount")),data.optJSONArray("lowStock")==null?"Catalogue":"Stock local",false,"package");
         LinearLayout secondMetrics=row(); LinearLayout.LayoutParams sm=lp(-1,-2); sm.topMargin=dp(10); area.addView(secondMetrics,sm);
-        int lows=data.optJSONArray("lowStock")==null?0:data.optJSONArray("lowStock").length(); addMetric(secondMetrics,"STOCK BAS",String.valueOf(lows),"À réapprovisionner",false);
-        addMetric(secondMetrics,"RÉSEAU","Local","Même Wi‑Fi",true);
+        int lows=data.optJSONArray("lowStock")==null?0:data.optJSONArray("lowStock").length(); addMetric(secondMetrics,"STOCK BAS",String.valueOf(lows),"À réapprovisionner",false,"triangle_alert");
+        addMetric(secondMetrics,"RÉSEAU","Local","Même Wi‑Fi",true,"wifi");
         LinearLayout controls=column(); pad(controls,15,14,15,15); controls.setBackground(shape(Color.WHITE,LINE,15)); LinearLayout.LayoutParams cc=lp(-1,-2);cc.topMargin=dp(14);area.addView(controls,cc);
-        TextView ch=text("ALERTES EN DIRECT",14,INK,true); controls.addView(ch);
-        TextView status=text(prefs.getBoolean("monitoring",false)?"Surveillance active · restez sur le Wi‑Fi de la boutique.":"Surveillance arrêtée · activez-la pour recevoir les alertes.",13,MUTED,false); LinearLayout.LayoutParams st=lp(-1,-2);st.topMargin=dp(4);controls.addView(status,st);
+        TextView ch=text("ALERTES EN DIRECT",14,INK,true); withIcon(ch,"bell",18,GREEN_BRIGHT,8); controls.addView(ch);
         boolean running=prefs.getBoolean("monitoring",false);
-        Button monitor=button(running?"Arrêter la surveillance":"Démarrer la surveillance",!running,()->{if(prefs.getBoolean("monitoring",false))stopMonitoring();else requestNotificationPermissionAndStart();}); LinearLayout.LayoutParams mp=lp(-1,56);mp.topMargin=dp(12);controls.addView(monitor,mp);
+        TextView status=text(running?"Surveillance active · restez sur le Wi‑Fi de la boutique.":"Surveillance arrêtée · activez-la pour recevoir les alertes.",13,MUTED,false); LinearLayout.LayoutParams st=lp(-1,-2);st.topMargin=dp(4);controls.addView(status,st);
+        Button monitor=button(running?"Arrêter la surveillance":"Démarrer la surveillance",!running,running?"bell_off":"bell",()->{if(prefs.getBoolean("monitoring",false))stopMonitoring();else requestNotificationPermissionAndStart();}); LinearLayout.LayoutParams mp=lp(-1,56);mp.topMargin=dp(12);controls.addView(monitor,mp);
         LinearLayout actions=row(); LinearLayout.LayoutParams ap=lp(-1,-2);ap.topMargin=dp(10);area.addView(actions,ap);
-        Button refresh=button("Actualiser",false,this::loadDashboard); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,dp(52),1);rp.setMargins(0,0,dp(5),0);actions.addView(refresh,rp);
-        Button logout=button("Déconnexion",false,this::logout); LinearLayout.LayoutParams lop=new LinearLayout.LayoutParams(0,dp(52),1);lop.setMargins(dp(5),0,0,0);actions.addView(logout,lop);
-        addSection(area,"STOCK À SURVEILLER",lowStockText(data.optJSONArray("lowStock")));
-        addSection(area,"FOURNISSEURS",suppliersText(currentSuppliers));
-        addSection(area,"ACTIVITÉ RÉCENTE",notificationsText(data.optJSONArray("notifications")));
-        TextView footer=text("La base de données reste sur le poste. L’application communique avec lui sur le réseau local.",12,MUTED,false); footer.setGravity(Gravity.CENTER); LinearLayout.LayoutParams ft=lp(-1,-2);ft.topMargin=dp(18);area.addView(footer,ft);
+        Button refresh=button("Actualiser",false,"refresh_cw",this::loadDashboard); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,dp(52),1);rp.setMargins(0,0,dp(5),0);actions.addView(refresh,rp);
+        Button logout=button("Déconnexion",false,"log_out",this::logout); LinearLayout.LayoutParams lop=new LinearLayout.LayoutParams(0,dp(52),1);lop.setMargins(dp(5),0,0,0);actions.addView(logout,lop);
+        addSection(area,"STOCK À SURVEILLER","triangle_alert",lowStockText(data.optJSONArray("lowStock")));
+        addSection(area,"FOURNISSEURS","truck",suppliersText(currentSuppliers));
+        addSection(area,"ACTIVITÉ RÉCENTE","receipt",notificationsText(data.optJSONArray("notifications")));
+        TextView footer=text("La base de données reste sur le poste. L’application communique avec lui sur le réseau local.  ·  Version "+appVersion(),12,MUTED,false); footer.setGravity(Gravity.CENTER); LinearLayout.LayoutParams ft=lp(-1,-2);ft.topMargin=dp(18);area.addView(footer,ft);
     }
 
-    private void addMetric(LinearLayout parent,String title,String value,String caption,boolean wide) {
+    private void addMetric(LinearLayout parent,String title,String value,String caption,boolean wide,String iconName) {
         LinearLayout card=column(); pad(card,12,12,12,12); card.setBackground(shape(Color.WHITE,LINE,13)); LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,dp(116),1); if(parent.getChildCount()>0)p.setMargins(dp(8),0,0,0);parent.addView(card,p);
-        card.addView(text(title,9,MUTED,true)); TextView v=text(value,22,wide?GREEN_BRIGHT:INK,true); v.setMaxLines(1); LinearLayout.LayoutParams vp=lp(-1,-2);vp.topMargin=dp(7);card.addView(v,vp);TextView c=text(caption,11,MUTED,false);LinearLayout.LayoutParams cp=lp(-1,-2);cp.topMargin=dp(3);card.addView(c,cp);
+        LinearLayout head=row(); TextView t=text(title,9,MUTED,true); head.addView(t,new LinearLayout.LayoutParams(0,-2,1)); head.addView(iconView(iconName,16,wide?GREEN_BRIGHT:MUTED),lp(16,16)); card.addView(head);
+        TextView v=text(value,22,wide?GREEN_BRIGHT:INK,true); v.setMaxLines(1); LinearLayout.LayoutParams vp=lp(-1,-2);vp.topMargin=dp(7);card.addView(v,vp);TextView c=text(caption,11,MUTED,false);LinearLayout.LayoutParams cp=lp(-1,-2);cp.topMargin=dp(3);card.addView(c,cp);
     }
 
-    private void addSection(LinearLayout parent,String title,String content) {
-        LinearLayout card=column();pad(card,15,14,15,14);card.setBackground(shape(Color.WHITE,LINE,15));LinearLayout.LayoutParams p=lp(-1,-2);p.topMargin=dp(12);parent.addView(card,p);card.addView(text(title,13,INK,true));TextView body=text(content,13,MUTED,false);body.setLineSpacing(dp(4),1f);LinearLayout.LayoutParams bp=lp(-1,-2);bp.topMargin=dp(8);card.addView(body,bp);
+    private void addSection(LinearLayout parent,String title,String iconName,String content) {
+        LinearLayout card=column();pad(card,15,14,15,14);card.setBackground(shape(Color.WHITE,LINE,15));LinearLayout.LayoutParams p=lp(-1,-2);p.topMargin=dp(12);parent.addView(card,p);
+        TextView head=text(title,13,INK,true); withIcon(head,iconName,17,GREEN_BRIGHT,8); card.addView(head);
+        TextView body=text(content,13,MUTED,false);body.setLineSpacing(dp(4),1f);LinearLayout.LayoutParams bp=lp(-1,-2);bp.topMargin=dp(8);card.addView(body,bp);
     }
 
     private String lowStockText(JSONArray a) {
@@ -188,7 +216,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadDashboard() {
-        io.execute(() -> {try{String server=prefs.getString("server","");String cookie=prefs.getString("cookie","");Result r=request(server+"/api/overview","GET",cookie,null);JSONObject j=new JSONObject(r.body);if(r.status<200||r.status>=300)throw new Exception(j.optString("error","Chargement impossible."));JSONArray suppliers=null;try{Result sr=request(server+"/api/suppliers","GET",cookie,null);if(sr.status>=200&&sr.status<300)suppliers=new JSONObject(sr.body).optJSONArray("suppliers");}catch(Exception ignored){}JSONArray finalSuppliers=suppliers;runOnUiThread(()->{currentSuppliers=finalSuppliers;showDashboard(j);});}catch(Exception e){runOnUiThread(()->toast("Connexion au poste impossible. Vérifiez le Wi‑Fi puis actualisez."));}});
+        io.execute(() -> {try{Result r=requestAuthed(prefs,"/api/overview","GET",null);if(r.status==401||r.status==403){prefs.edit().remove("cookie").remove("deviceToken").putBoolean("monitoring",false).apply();runOnUiThread(()->{toast("Ce téléphone n’est plus associé à la caisse. Associez-le à nouveau.");showLogin();});return;}JSONObject j=new JSONObject(r.body);if(r.status<200||r.status>=300)throw new Exception(j.optString("error","Chargement impossible."));JSONArray suppliers=null;try{Result sr=requestAuthed(prefs,"/api/suppliers","GET",null);if(sr.status>=200&&sr.status<300)suppliers=new JSONObject(sr.body).optJSONArray("suppliers");}catch(Exception ignored){}JSONArray finalSuppliers=suppliers;runOnUiThread(()->{currentSuppliers=finalSuppliers;showDashboard(j);});}catch(Exception e){runOnUiThread(()->toast("Connexion au poste impossible. Vérifiez le Wi‑Fi puis actualisez."));}});
     }
 
     private void requestNotificationPermissionAndStart() {
@@ -200,9 +228,12 @@ public final class MainActivity extends Activity {
         prefs.edit().putBoolean("monitoring",true).apply();Intent i=new Intent(this,MonitorService.class);if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);toast("Surveillance locale démarrée.");loadDashboard();
     }
     private void stopMonitoring() { prefs.edit().putBoolean("monitoring",false).apply();stopService(new Intent(this,MonitorService.class));toast("Surveillance arrêtée.");loadDashboard(); }
-    private void logout() { stopMonitoring();io.execute(()->{try{request(prefs.getString("server","")+"/api/logout","POST",prefs.getString("cookie",""),"{}");}catch(Exception ignored){}prefs.edit().remove("cookie").remove("ownerName").apply();runOnUiThread(this::showLogin);}); }
+    private void logout() {
+        prefs.edit().putBoolean("monitoring",false).apply(); stopService(new Intent(this,MonitorService.class));
+        io.execute(()->{String base=prefs.getString("server","");try{request(base+"/api/owner/device-logout","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).toString());}catch(Exception ignored){}try{request(base+"/api/logout","POST",prefs.getString("cookie",""),"{}");}catch(Exception ignored){}prefs.edit().remove("cookie").remove("deviceToken").remove("ownerName").apply();runOnUiThread(this::showLogin);});
+    }
 
-    private void setBusy(boolean busy) { if(passwordField!=null)passwordField.setEnabled(!busy); if(usernameField!=null)usernameField.setEnabled(!busy); if(serverField!=null)serverField.setEnabled(!busy); }
+    private void setBusy(boolean busy) { if(codeField!=null)codeField.setEnabled(!busy); if(serverField!=null)serverField.setEnabled(!busy); }
     private void hideKeyboard(){try{((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(),0);}catch(Exception ignored){}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private String normalize(String input){String s=input.trim();if(s.isEmpty())return "";if(!s.contains("://"))s="http://"+s;if(!s.matches("(?i)^https?://[^/]+(?::\\d+)?/?$"))return "";return s.replaceAll("/+$","");}
@@ -211,6 +242,22 @@ public final class MainActivity extends Activity {
     static String num(double v){return v==(long)v?String.valueOf((long)v):String.format(java.util.Locale.FRANCE,"%.2f",v);}
 
     static final class Result { final int status;final String body,cookie;Result(int s,String b,String c){status=s;body=b;cookie=c;} }
+
+    // A request with the saved session; when the till says the session expired, the paired phone signs in again by itself.
+    static Result requestAuthed(SharedPreferences prefs,String path,String method,String json)throws Exception {
+        String base=prefs.getString("server","");
+        Result r=request(base+path,method,prefs.getString("cookie",""),json);
+        if(r.status==401&&refreshSession(prefs))r=request(base+path,method,prefs.getString("cookie",""),json);
+        return r;
+    }
+    static boolean refreshSession(SharedPreferences prefs) {
+        String token=prefs.getString("deviceToken",""),base=prefs.getString("server","");
+        if(token.isEmpty()||base.isEmpty())return false;
+        try{Result r=request(base+"/api/owner/device-login","POST",null,new JSONObject().put("deviceToken",token).toString());
+            if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){prefs.edit().putString("cookie",r.cookie).apply();return true;}
+        }catch(Exception ignored){}
+        return false;
+    }
     static Result request(String address,String method,String cookie,String json)throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL(address).openConnection();c.setRequestMethod(method);c.setConnectTimeout(9000);c.setReadTimeout(15000);c.setRequestProperty("Accept","application/json");c.setRequestProperty("Connection","close");if(cookie!=null&&!cookie.isEmpty())c.setRequestProperty("Cookie",cookie);if(json!=null){c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json; charset=utf-8");try(OutputStream o=c.getOutputStream()){o.write(json.getBytes(StandardCharsets.UTF_8));}}
         int status=c.getResponseCode();InputStream in=status>=400?c.getErrorStream():c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream();if(in!=null){byte[] buffer=new byte[4096];int n;while((n=in.read(buffer))!=-1)out.write(buffer,0,n);in.close();}String set=c.getHeaderField("Set-Cookie"),cookieOut="";if(set!=null){int end=set.indexOf(';');cookieOut=end<0?set:set.substring(0,end);}String response=new String(out.toByteArray(),StandardCharsets.UTF_8);c.disconnect();return new Result(status,response,cookieOut);

@@ -100,6 +100,13 @@ if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name ===
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'pin_hash')) {
   db.exec('ALTER TABLE users ADD COLUMN pin_hash TEXT');
 }
+db.exec(`CREATE TABLE IF NOT EXISTS owner_devices (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_seen_at TEXT
+);
+CREATE TABLE IF NOT EXISTS owner_pairings (
+  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL
+);`);
 if (!db.prepare('PRAGMA table_info(products)').all().some(column => column.name === 'image_url')) {
   db.exec("ALTER TABLE products ADD COLUMN image_url TEXT NOT NULL DEFAULT ''");
 }
@@ -653,14 +660,20 @@ async function api(request, response, url) {
   }
   if (route === '/api/overview' && request.method === 'GET') {
     requireOwner(request);
-    const dateParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Casablanca',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(part=>[part.type,part.value]));
-    const today = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
-    const sales = db.prepare('SELECT COUNT(*) n,COALESCE(SUM(total_cents),0) total FROM sales WHERE substr(created_at,1,10)=?').get(today);
+    // Sales are stored in UTC, but "today" and the 7-day chart follow the shop's own calendar day (Africa/Casablanca).
+    const shopDay = date => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Casablanca',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date).map(part=>[part.type,part.value])); return `${p.year}-${p.month}-${p.day}`; };
+    const today = shopDay(new Date());
+    const totalsByDay = {};
+    for (const sale of db.prepare('SELECT created_at,total_cents FROM sales WHERE created_at>=?').all(new Date(Date.now()-9*86400_000).toISOString())) {
+      const day = shopDay(new Date(sale.created_at)), entry = totalsByDay[day] || (totalsByDay[day] = { n: 0, total: 0 });
+      entry.n++; entry.total += sale.total_cents;
+    }
+    const sales = { n: (totalsByDay[today] || { n: 0 }).n, total: (totalsByDay[today] || { total: 0 }).total };
     const lowStock = db.prepare('SELECT id,name,sku,quantity,reorder_level FROM products WHERE active=1 AND quantity<=reorder_level ORDER BY quantity LIMIT 20').all();
     const recent = db.prepare('SELECT id,number,created_at,total_cents,payment,cashier_name FROM sales ORDER BY created_at DESC LIMIT 12').all();
     const notifications = db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 25').all();
     const salesTrend=[];
-    for(let offset=6;offset>=0;offset--){const date=new Date(Date.now()-offset*86400_000),parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Casablanca',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date).map(part=>[part.type,part.value])),day=`${parts.year}-${parts.month}-${parts.day}`;salesTrend.push({day,label:new Intl.DateTimeFormat('fr-MA',{timeZone:'Africa/Casablanca',weekday:'short'}).format(date),totalCents:Number(db.prepare('SELECT COALESCE(SUM(total_cents),0) total FROM sales WHERE substr(created_at,1,10)=?').get(day).total)});}
+    for(let offset=6;offset>=0;offset--){const date=new Date(Date.now()-offset*86400_000),day=shopDay(date);salesTrend.push({day,label:new Intl.DateTimeFormat('fr-MA',{timeZone:'Africa/Casablanca',weekday:'short'}).format(date),totalCents:Number((totalsByDay[day]||{total:0}).total)});}
     return send(response, 200, { today, salesCount:sales.n, revenueCents:sales.total, lowStock, recent, notifications, productCount:db.prepare('SELECT COUNT(*) n FROM products WHERE active=1').get().n, salesTrend });
   }
   if (route === '/api/sales' && request.method === 'GET') {
@@ -751,6 +764,58 @@ async function api(request, response, url) {
     createNotification('Nouvelle clé de récupération', `${me.name} · l’ancienne clé ne fonctionne plus`, 'security');
     return send(response, 200, { recoveryKey: fresh });
   }
+  // Owner phones: one-time pairing code -> long random device token kept by the Android app (stored hashed here).
+  const ownerPairingMatch = route.match(/^\/api\/team\/([^/]+)\/owner-pairing$/);
+  if (ownerPairingMatch && request.method === 'POST') {
+    const actor = requireOwner(request), userId = clean(decodeURIComponent(ownerPairingMatch[1]), 100);
+    const user = db.prepare('SELECT id,name,role,active FROM users WHERE id=?').get(userId);
+    if (!user || user.role !== 'owner' || !user.active) throw new HttpError(404, 'Compte propriétaire introuvable.');
+    if (user.id !== actor.id && !isAdmin(actor.id)) throw new HttpError(403, 'Seul le propriétaire concerné ou l’administrateur peut associer ce téléphone.');
+    const code = randomBytes(8).toString('hex').slice(0, 12).toUpperCase(), createdAt = isoNow(), expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    db.prepare('DELETE FROM owner_pairings WHERE user_id=? OR expires_at<=?').run(userId, createdAt);
+    db.prepare('INSERT INTO owner_pairings(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)').run(sha256(code), userId, expiresAt, createdAt);
+    return send(response, 201, { code, expiresAt, kind: 'owner', serverUrls: ownerUrls(), workerUrls: ownerUrls().map(url => `${url}/owner-app`), workerApkUrls: ownerUrls().map(url => `${url}/PromedPara-Owner.apk`) });
+  }
+  if (route === '/api/owner/enroll' && request.method === 'POST') {
+    rateLimit(request, 'owner-enroll', 12);
+    const body = await readBody(request), code = clean(body.code, 20).toUpperCase().replace(/[^A-F0-9]/g, '');
+    if (!/^[A-F0-9]{12}$/.test(code)) throw new HttpError(401, 'Code d’association invalide ou expiré.');
+    const pairing = db.prepare("SELECT p.token_hash,p.user_id,u.id,u.name,u.username,u.role,u.active,u.can_receive_stock FROM owner_pairings p JOIN users u ON u.id=p.user_id WHERE p.token_hash=? AND p.expires_at>? AND u.active=1 AND u.role='owner'").get(sha256(code), isoNow());
+    if (!pairing) throw new HttpError(401, 'Code d’association invalide ou expiré.');
+    const token = randomBytes(32).toString('hex'), deviceId = id('odev'), createdAt = isoNow(), deviceName = clean(body.deviceName, 60) || 'Téléphone';
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('INSERT INTO owner_devices(id,user_id,token_hash,name,created_at,last_seen_at) VALUES(?,?,?,?,?,?)').run(deviceId, pairing.user_id, sha256(token), deviceName, createdAt, createdAt);
+      db.prepare('DELETE FROM owner_pairings WHERE token_hash=?').run(pairing.token_hash);
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+    createNotification('Téléphone propriétaire associé', `${pairing.name} · ${deviceName}`, 'security');
+    return send(response, 201, { user: userSafe(pairing), deviceToken: token }, createSession(pairing));
+  }
+  if (route === '/api/owner/device-login' && request.method === 'POST') {
+    rateLimit(request, 'owner-device-login', 30);
+    const body = await readBody(request), token = String(body.deviceToken || '');
+    if (!/^[a-f0-9]{64}$/.test(token)) throw new HttpError(401, 'Téléphone non reconnu. Associez-le à nouveau.');
+    const device = db.prepare("SELECT d.id AS device_id,u.id,u.name,u.username,u.role,u.can_receive_stock FROM owner_devices d JOIN users u ON u.id=d.user_id WHERE d.token_hash=? AND d.active=1 AND u.active=1 AND u.role='owner'").get(sha256(token));
+    if (!device) throw new HttpError(401, 'Téléphone non reconnu. Associez-le à nouveau.');
+    db.prepare('UPDATE owner_devices SET last_seen_at=? WHERE id=?').run(isoNow(), device.device_id);
+    return send(response, 200, { user: userSafe(device) }, createSession(device));
+  }
+  if (route === '/api/owner/device-logout' && request.method === 'POST') {
+    const body = await readBody(request), token = String(body.deviceToken || '');
+    if (/^[a-f0-9]{64}$/.test(token)) db.prepare('UPDATE owner_devices SET active=0 WHERE token_hash=?').run(sha256(token));
+    return send(response, 200, { ok: true });
+  }
+  const revokeOwnerDeviceMatch = route.match(/^\/api\/owner\/devices\/([^/]+)$/);
+  if (revokeOwnerDeviceMatch && request.method === 'DELETE') {
+    const actor = requireOwner(request), deviceId = clean(decodeURIComponent(revokeOwnerDeviceMatch[1]), 60);
+    const device = db.prepare('SELECT d.id,d.user_id,d.name,u.name AS owner_name FROM owner_devices d JOIN users u ON u.id=d.user_id WHERE d.id=? AND d.active=1').get(deviceId);
+    if (!device) throw new HttpError(404, 'Téléphone introuvable.');
+    if (device.user_id !== actor.id && !isAdmin(actor.id)) throw new HttpError(403, 'Seul le propriétaire concerné ou l’administrateur peut révoquer ce téléphone.');
+    db.prepare('UPDATE owner_devices SET active=0 WHERE id=?').run(deviceId);
+    createNotification('Téléphone propriétaire révoqué', `${device.owner_name} · ${device.name} · par ${actor.name}`, 'security');
+    return send(response, 200, { ok: true });
+  }
   const resetPasswordMatch = route.match(/^\/api\/team\/([^/]+)\/reset-password$/);
   if (resetPasswordMatch && request.method === 'POST') {
     const actor = requireOwner(request);
@@ -808,7 +873,7 @@ async function api(request, response, url) {
     const users=db.prepare(`SELECT u.id,u.name,u.username,u.role,u.active,u.created_at,u.can_receive_stock,(u.pin_hash IS NOT NULL) AS has_pin,u.can_add_products,u.add_products_until,
       (SELECT COUNT(*) FROM worker_devices d WHERE d.user_id=u.id AND d.active=1) AS active_devices
       FROM users u ORDER BY u.role,u.name`).all();
-    for(const user of users)user.devices=user.role==='cashier'?db.prepare('SELECT id,created_at,last_seen_at FROM worker_devices WHERE user_id=? AND active=1 ORDER BY created_at DESC').all(user.id):[];
+    for(const user of users)user.devices=user.role==='cashier'?db.prepare('SELECT id,created_at,last_seen_at FROM worker_devices WHERE user_id=? AND active=1 ORDER BY created_at DESC').all(user.id):db.prepare('SELECT id,name,created_at,last_seen_at FROM owner_devices WHERE user_id=? AND active=1 ORDER BY created_at DESC').all(user.id);
     return send(response,200,{users});
   }
   if (route === '/api/team' && request.method === 'POST') {
