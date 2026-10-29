@@ -38,3 +38,19 @@
 .legacy-quick-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
 .legacy-quick-stats span{display:flex;flex-direction:column;padding:12px 14px;border-radius:12px;background:#eef6f1;border:1px solid #d3ddd6;color:#5b6b61;font-size:13px}
 .legacy-quick-stats b{font-size:22px;color:#173d2a;margin-bottom:2px}
+
+.legacy-check-modal{max-width:640px;width:calc(100% - 32px)}
+.legacy-check-body{padding:6px 24px 6px;line-height:1.5;max-height:62vh;overflow:auto}
+.check-bar{height:10px;border-radius:6px;background:#e4ebe6;overflow:hidden;margin:6px 0 12px}
+.check-bar i{display:block;height:100%;background:#1b6b45;transition:width .4s}
+.check-now{display:flex;align-items:center;gap:10px;margin:4px 0;font-weight:600;color:#173d2a}
+.check-folder{margin:2px 0 12px;padding:8px 10px;border-radius:8px;background:#f1f6f3;color:#5b6b61;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;text-align:left}
+.check-counters{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.check-counters span{display:flex;flex-direction:column;padding:10px 12px;border-radius:10px;background:#eef6f1;border:1px solid #d3ddd6;color:#5b6b61;font-size:12px}
+.check-counters b{font-size:20px;color:#173d2a}
+.check-live{margin:10px 0 4px;color:#5b6b61;font-size:13px}
+.check-file{display:flex;align-items:center;gap:12px;padding:10px 12px;margin:8px 0;border:1px solid #d3ddd6;border-radius:12px;background:#fff;color:#1b6b45}
+.check-file div{flex:1;min-width:0}.check-file b{display:block;color:#173d2a;word-break:break-all}.check-file small{display:block;color:#5b6b61;word-break:break-all}
+.check-ok{display:flex;align-items:center;gap:8px;color:#1b6b45}.check-none{display:flex;align-items:center;gap:8px;color:#a15c07}
+.check-oldapp{display:flex;align-items:center;gap:8px;margin:2px 0 10px;padding:8px 10px;border-radius:8px;background:#eef6f1;color:#173d2a;font-size:13px;word-break:break-all}
+.check-where{margin-top:8px;font-size:12.5px;color:#5b6b61}.check-where ul{margin:6px 0 0 18px;padding:0;word-break:break-all}

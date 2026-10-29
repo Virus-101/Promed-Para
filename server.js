@@ -310,11 +310,13 @@ async function looksLikeLegacyExport(file) {
 }
 // Asynchronous on purpose: on the shop PC the scan can take seconds and the till must keep answering meanwhile.
 // quick: user folders, drive roots and the old software's own folder. deep: much further down every folder (a minute at most).
-async function scanLegacyExports(deep) {
+async function scanLegacyExports(deep, progress) {
+  progress = progress || {}; progress.found = progress.found || []; progress.oldApp = progress.oldApp || []; progress.stage = 'Recherche du dossier de l’ancien logiciel…'; progress.visited = 0; progress.rootsDone = 0; progress.rootsTotal = 0; progress.current = '';
   const started = Date.now(), limitMs = deep ? 45000 : 9000, limitEntries = deep ? 200000 : 25000, found = new Map(), searched = [], oldApp = new Set(); let visited = 0;
   const skipDir = /^(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information|node_modules|promedpara|appdata|recovery|perflogs|msocache|\.git|android|sdk)$/i;
   const walk = async (dir, depth) => {
     if (Date.now() - started > limitMs || visited > limitEntries) return;
+    progress.current = dir; progress.visited = visited;
     let entries; try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
@@ -323,7 +325,7 @@ async function scanLegacyExports(deep) {
         if (!/\.(csv|txt)$/i.test(entry.name)) continue;
         try {
           const stat = await fs.promises.stat(full);
-          if (stat.size > 0 && stat.size <= 30 * 1024 * 1024 && await looksLikeLegacyExport(full)) found.set(full.toLowerCase(), { file: full, stat });
+          if (stat.size > 0 && stat.size <= 30 * 1024 * 1024 && await looksLikeLegacyExport(full)) { found.set(full.toLowerCase(), { file: full, stat }); progress.found.push({ fileName: entry.name, folder: dir, size: stat.size, modifiedAt: stat.mtime.toISOString() }); }
         } catch { }
       } else if (entry.isDirectory() && depth > 0 && !skipDir.test(entry.name)) await walk(full, depth - 1);
     }
@@ -340,11 +342,13 @@ async function scanLegacyExports(deep) {
   for (const drive of drives) { appParents.push(drive); appParents.push(path.join(drive, 'Program Files')); appParents.push(path.join(drive, 'Program Files (x86)')); appParents.push(path.join(drive, 'ProgramData')); }
   for (const parent of appParents) {
     let entries; try { entries = await fs.promises.readdir(parent, { withFileTypes: true }); } catch { continue; }
-    for (const entry of entries) if (entry.isDirectory() && OLD_APP_FOLDER.test(entry.name) && !/promedpara/i.test(entry.name)) { const folder = path.join(parent, entry.name); oldApp.add(folder); addRoot(folder, 6); }
+    for (const entry of entries) if (entry.isDirectory() && OLD_APP_FOLDER.test(entry.name) && !/promedpara/i.test(entry.name)) { const folder = path.join(parent, entry.name); oldApp.add(folder); progress.oldApp = [...oldApp]; addRoot(folder, 6); }
   }
   for (const drive of drives) addRoot(drive, deep ? 5 : 2);
   addRoot(path.dirname(LEGACY_EXPORT_PATH), 3);
-  for (const [dir, depth] of roots) await walk(dir, depth);
+  progress.rootsTotal = roots.length;
+  for (const [dir, depth] of roots) { progress.stage = 'Vérification de ' + dir; await walk(dir, depth); progress.rootsDone++; }
+  progress.visited = visited; progress.stage = 'Terminé'; progress.current = '';
   legacyFiles.clear();
   const rank = ({ file, stat }) => (/^articles/i.test(path.basename(file)) ? 1e15 : 0) + (/(logica|export)/i.test(file) ? 1e14 : 0) + stat.mtimeMs;
   const candidates = [...found.values()].sort((x, y) => rank(y) - rank(x)).slice(0, 12).map(({ file, stat }) => {
@@ -352,6 +356,20 @@ async function scanLegacyExports(deep) {
     return { id, fileName: path.basename(file), folder: path.dirname(file), size: stat.size, modifiedAt: stat.mtime.toISOString() };
   });
   return { candidates, oldApp: [...oldApp].slice(0, 6), searched: [...new Set(searched)].slice(0, 20), deep: Boolean(deep), seconds: Math.round((Date.now() - started) / 100) / 10 };
+}
+// A visible check: one run at a time, with live progress that the screen polls.
+let legacyJob = null;
+function legacySnapshot() {
+  const job = legacyJob;
+  if (!job) return { running: false, started: false };
+  return { running: job.running, started: true, deep: job.deep, stage: job.stage || '', current: job.current || '', visited: job.visited || 0, rootsDone: job.rootsDone || 0, rootsTotal: job.rootsTotal || 0, found: job.found || [], oldApp: job.oldApp || [], seconds: Math.round(((job.finishedAt || Date.now()) - job.startedAt) / 100) / 10, result: job.running ? null : job.result, error: job.error || '' };
+}
+function startLegacyJob(deep) {
+  if (legacyJob && legacyJob.running) return legacyJob;
+  const job = { running: true, deep: Boolean(deep), startedAt: Date.now(), found: [], oldApp: [], result: null, error: '' };
+  legacyJob = job;
+  scanLegacyExports(job.deep, job).then(result => { job.result = result; job.running = false; job.finishedAt = Date.now(); }).catch(error => { job.error = error.message; job.running = false; job.finishedAt = Date.now(); job.result = { candidates: [], oldApp: [], searched: [], deep: job.deep, seconds: 0 }; });
+  return job;
 }
 // Only a path that the scan itself returned can be read (the browser never supplies a path).
 const chosenLegacyPath = id => {
@@ -363,6 +381,13 @@ const chosenLegacyPath = id => {
 async function api(request, response, url) {
   const route = url.pathname;
   if (route === '/api/status' && request.method === 'GET') return send(response, 200, { setupRequired: firstRun(), business: 'PromedPara', version: APP_VERSION, location: 'Errachidia, Maroc', ownerUrls:ownerUrls() });
+  if (route === '/api/legacy-export/check' && request.method === 'POST') {
+    requireOwner(request);
+    const body = await readBody(request);
+    startLegacyJob(Boolean(body.deep));
+    return send(response, 200, legacySnapshot());
+  }
+  if (route === '/api/legacy-export/check' && request.method === 'GET') { requireOwner(request); return send(response, 200, legacySnapshot()); }
   if (route === '/api/legacy-export/scan' && request.method === 'GET') { requireOwner(request); return send(response, 200, await scanLegacyExports(url.searchParams.get('deep') === '1')); }
   if (route === '/api/legacy-export' && request.method === 'GET') {
     requireOwner(request);
