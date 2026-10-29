@@ -80,7 +80,7 @@ async function openView(view){
     if(view==='receive'){state.products=(await api('/api/products')).products;state.suppliers=(await api('/api/suppliers')).suppliers;}
     if(view==='add-products')state.products=(await api('/api/products')).products;
     if(view==='dashboard')state.overview=await api('/api/overview');
-    if(view==='stock'){state.products=(await api('/api/products')).products;state.suppliers=(await api('/api/suppliers')).suppliers;state.legacyCandidates=[];if(!state.products.length){try{state.legacyCandidates=(await api('/api/legacy-export/scan')).candidates;}catch(e){state.legacyCandidates=[];}}}
+    if(view==='stock'){state.products=(await api('/api/products')).products;state.suppliers=(await api('/api/suppliers')).suppliers;state.legacyCandidates=[];state.legacyInfo=null;if(!state.products.length){api('/api/legacy-export/scan').then(r=>{state.legacyInfo=r;state.legacyCandidates=r.candidates;if(state.view==='stock')renderApp();}).catch(()=>{state.legacyInfo={candidates:[],oldApp:[],searched:[]};if(state.view==='stock')renderApp();});}}
     if(view==='suppliers')state.suppliers=(await api('/api/suppliers')).suppliers;
     if(view==='sales')state.sales=(await api('/api/sales')).sales;
     if(view==='team')state.team=(await api('/api/team')).users;
@@ -151,8 +151,13 @@ async function maybePromptLegacy(){
   }catch(e){/* the owner can still use the button on the Stock page */}
 }
 function legacyBanner(){
-  const list=state.legacyCandidates||[];
-  if(!list.length||state.products.length)return '';
+  const info=state.legacyInfo,list=state.legacyCandidates||[];
+  if(state.products.length)return '';
+  if(!list.length){
+    if(!info)return `<div class="owner-import-note"><span><span class="spinner"></span></span><div><b>Recherche du stock de l’ancien logiciel…</b><small>Quelques secondes : bureau, documents, clés USB et dossier du logiciel.</small></div></div>`;
+    const where=info.oldApp&&info.oldApp.length?`Ancien logiciel repéré : <b>${esc(info.oldApp[0])}</b>. `:'';
+    return `<div class="owner-import-note" style="border-color:#c27a12;background:#fdf6e7"><span>${ico('triangle-alert',20)}</span><div><b>Fichier de stock de l’ancien logiciel non trouvé</b><small>${where}Dans l’ancien logiciel, exportez la liste des articles en CSV (Articles….csv) vers le Bureau ou une clé USB, puis relancez la recherche. ${info.deep?'La recherche approfondie a déjà été faite.':''}</small></div>${info.deep?'':'<button class="button secondary" data-action="legacy-deep">Recherche approfondie</button>'}<button class="button primary" data-action="legacy-rescan">Relancer</button></div>`;
+  }
   const first=list[0];
   return `<div class="owner-import-note" style="border-color:#1d6b46;background:#e9f6ee"><span>${ico('file-check',20)}</span><div><b>Liste de l’ancien logiciel détectée</b><small>${esc(first.fileName)} · ${time(first.modifiedAt)} · ${esc(first.folder)}${list.length>1?` · ${list.length-1} autre(s) fichier(s) possible(s)`:''}</small></div><button class="button primary" data-action="${list.length>1?'detect-legacy-export':'legacy-load'}" data-id="${esc(first.id)}">Réviser et importer</button></div>`;
 }
@@ -242,15 +247,19 @@ function decodeCsvBuffer(buffer){
   try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{return new TextDecoder('windows-1252').decode(bytes);}
 }
 function parseCsvGrid(text){
-  text=text.replace(/^\uFEFF/,'');const first=text.split(/\r?\n/,1)[0]||'';const delimiter=[';',',','\t'].sort((a,b)=>first.split(b).length-first.split(a).length)[0];
+  text=text.replace(/^\uFEFF/,'');const NAMES=['article','designation','libelle','libellearticle','produit','nomproduit','nom','denomination','medicament','specialite'],PRICES=['prixv','prixvente','prixa','prixachat','pv','pa','prix','ppv','pph','prixttc','prixht','pvttc','puttc','tarif','prixpublic'],nh=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''),isHeader=cells=>cells.length>=3&&cells.some(c=>NAMES.includes(c))&&cells.some(c=>PRICES.includes(c));
+  const head=text.split(/\r?\n/).filter(l=>l.trim()!=='').slice(0,8);let delimiter=null,headerIndex=0;
+  for(const candidate of [';','\t',',']){const at=head.findIndex(l=>isHeader(l.split(candidate).map(nh)));if(at>=0&&(delimiter===null||at<headerIndex)){delimiter=candidate;headerIndex=at;}}
+  if(delimiter===null){const first=head[0]||'';delimiter=[';',',','\t'].sort((x,y)=>first.split(y).length-first.split(x).length)[0];headerIndex=0;}
   const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'&&quoted&&text[i+1]==='"'){cell+='"';i++;}else if(ch==='"'){quoted=!quoted;}else if(ch===delimiter&&!quoted){row.push(cell.trim());cell='';}else if((ch==='\n'||ch==='\r')&&!quoted){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell.trim());if(row.some(x=>x!==''))rows.push(row);row=[];cell='';}else cell+=ch;}if(quoted)throw new Error('Une cellule du CSV contient des guillemets non fermés.');row.push(cell.trim());if(row.some(x=>x!==''))rows.push(row);
+  if(headerIndex>0)rows.splice(0,headerIndex);
   if(rows.length<2)throw new Error('Le CSV doit contenir une ligne d’en-tête et au moins un produit.');
   return rows;
 }
 function parseImportPreview(text,fileName){
   const grid=parseCsvGrid(text),headers=grid.shift(),norm=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
   const normalized=headers.map(norm),find=aliases=>normalized.findIndex(header=>aliases.includes(header));
-  const mapping={name:find(['article','designation','produit','product','name','libelle','label']),category:find(['famille','categorie','category','family']),cost:find(['prixa','prixachat','cost','purchaseprice']),price:find(['prixv','prixvente','price','saleprice']),quantity:find(['qte','quantite','quantity','stock']),threshold:find(['alert','seuil','minstock','reorderlevel']),image:find(['imageurl','image','photo','urlimage','urlphoto'])};
+  const mapping={name:find(['article','designation','produit','product','name','libelle','label','libellearticle','nomproduit','denomination','medicament','specialite','nom']),category:find(['famille','categorie','category','family']),cost:find(['prixa','prixachat','cost','purchaseprice','pph','prixht','pa']),price:find(['prixv','prixvente','price','saleprice','ppv','pvttc','puttc','prixttc','prixpublic','tarif','pv']),quantity:find(['qte','quantite','quantity','stock']),threshold:find(['alert','seuil','minstock','reorderlevel']),image:find(['imageurl','image','photo','urlimage','urlphoto'])};
   const preview={fileName,headers,grid:grid.filter(row=>row.some(value=>String(value||'').trim())),mapping,stageId:'',confirmed:false,allowZeroSalePrice:false,duplicatePolicy:'skip',busy:false};
   return preview;
 }
@@ -392,6 +401,11 @@ else if(action==='goto-login'){state.loginMode='pin';renderLogin();return;}
       state.modal='';
       await openImportPreview(decodeCsvBuffer(bytes),data.fileName,{sourcePath:data.filePath,modifiedAt:data.modifiedAt});
     }catch(error){toast(error.message);}
+  }
+  else if(action==='legacy-deep'||action==='legacy-rescan'){
+    state.legacyInfo=null;renderApp();
+    try{const r=await api('/api/legacy-export/scan'+(action==='legacy-deep'?'?deep=1':''));state.legacyInfo=r;state.legacyCandidates=r.candidates;toast(r.candidates.length?'Fichier trouvé.':'Rien trouvé'+(r.deep?' même en recherche approfondie.':'.'));}catch(error){state.legacyInfo={candidates:[],oldApp:[],searched:[]};toast(error.message);}
+    renderApp();
   }
   else if(action==='legacy-quick-later'){const q=state.legacyQuick;try{if(q)localStorage.setItem(q.key,'1');}catch(e){}state.legacyQuick=null;state.modal='';renderApp();}
   else if(action==='legacy-quick-review'){const q=state.legacyQuick;if(!q)return;state.legacyQuick=null;state.modal='';try{await openImportPreview(q.text,q.data.fileName,{sourcePath:q.data.filePath,modifiedAt:q.data.modifiedAt});}catch(error){toast(error.message);}}

@@ -210,8 +210,14 @@ const readBody = request => new Promise((resolve, reject) => {
 });
 const parseCsvGrid = text => {
   text = String(text || '').replace(/^\uFEFF/, '');
-  const first = text.split(/\r?\n/, 1)[0] || '';
-  const delimiter = [';', ',', '\t'].sort((a, b) => first.split(b).length - first.split(a).length)[0];
+  // the column names may come after a title line: find the product-list header in the first lines and read with ITS delimiter
+  const head = text.split(/\r?\n/).filter(line => line.trim() !== '').slice(0, 8);
+  let delimiter = null, headerIndex = 0;
+  for (const candidate of [';', '\t', ',']) {
+    const at = head.findIndex(line => isLegacyHeader(line.split(candidate).map(normHeader)));
+    if (at >= 0 && (delimiter === null || at < headerIndex)) { delimiter = candidate; headerIndex = at; }
+  }
+  if (delimiter === null) { const first = head[0] || ''; delimiter = [';', ',', '\t'].sort((a, b) => first.split(b).length - first.split(a).length)[0]; headerIndex = 0; }
   const rows = []; let row = [], cell = '', quoted = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -226,6 +232,7 @@ const parseCsvGrid = text => {
   }
   if (quoted) throw new HttpError(400, 'Le CSV contient une cellule avec des guillemets non fermés.');
   row.push(cell.trim()); if (row.some(value => value !== '')) rows.push(row);
+  if (headerIndex > 0) rows.splice(0, headerIndex);
   if (rows.length < 2 || rows.length > 100_001) throw new HttpError(400, 'Le CSV doit contenir un en-tête et au maximum 100 000 lignes.');
   return rows;
 };
@@ -285,27 +292,29 @@ const createSession = user => {
 // ---- Detection of the previous software's product export (LOGICA writes "Articles_<date>...csv": Article, Famille, PRIX_A, PRIX_V, Qté, Alert)
 const legacyFiles = new Map();
 const legacyIdOf = file => createHash('sha256').update(file.toLowerCase()).digest('hex').slice(0, 12);
-const LEGACY_NAME_COLUMNS = ['article', 'designation', 'libelle', 'produit', 'nom'];
-const LEGACY_PRICE_COLUMNS = ['prixv', 'prixvente', 'prixa', 'prixachat', 'pv', 'pa', 'prix'];
-const normHeader = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
-// The first line must be a product-list header (a name column and a price column, at least 3 columns): notes and READMEs never match.
+const LEGACY_NAME_COLUMNS = ['article', 'designation', 'libelle', 'libellearticle', 'produit', 'nomproduit', 'nom', 'denomination', 'medicament', 'specialite'];
+const LEGACY_PRICE_COLUMNS = ['prixv', 'prixvente', 'prixa', 'prixachat', 'pv', 'pa', 'prix', 'ppv', 'pph', 'prixttc', 'prixht', 'pvttc', 'puttc', 'tarif', 'prixpublic'];
+const OLD_APP_FOLDER = /(logica|winpharma|pharmagest|lgpi|pharmony|officine|pharmacie|parapharm|winstock)/i;
+const normHeader = value => String(value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// A product-list header: at least 3 columns, a name column and a price column. Notes, READMEs, customer lists and accounting files never match.
+const isLegacyHeader = cells => cells.length >= 3 && cells.some(cell => LEGACY_NAME_COLUMNS.includes(cell)) && cells.some(cell => LEGACY_PRICE_COLUMNS.includes(cell));
+// Old software often writes a title line or two before the column names: look at the first lines, with any delimiter.
 async function looksLikeLegacyExport(file) {
   try {
-    const handle = await fs.promises.open(file, 'r'), buf = Buffer.alloc(4096);
-    const { bytesRead } = await handle.read(buf, 0, 4096, 0); await handle.close();
+    const handle = await fs.promises.open(file, 'r'), buf = Buffer.alloc(8192);
+    const { bytesRead } = await handle.read(buf, 0, 8192, 0); await handle.close();
     const head = buf.slice(0, bytesRead), text = head.length > 1 && head[0] === 0xFF && head[1] === 0xFE ? head.toString('utf16le') : head.toString('latin1');
-    const first = text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] || '';
-    const delimiter = [';', ',', '\t'].sort((a, b) => first.split(b).length - first.split(a).length)[0];
-    const cells = first.split(delimiter).map(normHeader);
-    return cells.length >= 3 && cells.some(cell => LEGACY_NAME_COLUMNS.includes(cell)) && cells.some(cell => LEGACY_PRICE_COLUMNS.includes(cell));
+    const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(line => line.trim() !== '').slice(0, 8);
+    return lines.some(line => [';', ',', '\t'].some(delimiter => isLegacyHeader(line.split(delimiter).map(normHeader))));
   } catch { return false; }
 }
 // Asynchronous on purpose: on the shop PC the scan can take seconds and the till must keep answering meanwhile.
-async function scanLegacyExports() {
-  const started = Date.now(), found = new Map(); let visited = 0;
-  const skipDir = /^(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information|node_modules|promedpara|appdata|recovery|perflogs|msocache)$/i;
+// quick: user folders, drive roots and the old software's own folder. deep: much further down every folder (a minute at most).
+async function scanLegacyExports(deep) {
+  const started = Date.now(), limitMs = deep ? 45000 : 9000, limitEntries = deep ? 200000 : 25000, found = new Map(), searched = [], oldApp = new Set(); let visited = 0;
+  const skipDir = /^(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information|node_modules|promedpara|appdata|recovery|perflogs|msocache|\.git|android|sdk)$/i;
   const walk = async (dir, depth) => {
-    if (Date.now() - started > 8000 || visited > 20000) return;
+    if (Date.now() - started > limitMs || visited > limitEntries) return;
     let entries; try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
@@ -314,22 +323,35 @@ async function scanLegacyExports() {
         if (!/\.(csv|txt)$/i.test(entry.name)) continue;
         try {
           const stat = await fs.promises.stat(full);
-          if (stat.size > 0 && stat.size <= 20 * 1024 * 1024 && await looksLikeLegacyExport(full)) found.set(full.toLowerCase(), { file: full, stat });
+          if (stat.size > 0 && stat.size <= 30 * 1024 * 1024 && await looksLikeLegacyExport(full)) found.set(full.toLowerCase(), { file: full, stat });
         } catch { }
       } else if (entry.isDirectory() && depth > 0 && !skipDir.test(entry.name)) await walk(full, depth - 1);
     }
   };
-  for (const extra of String(process.env.PROMEDPARA_LEGACY_DIRS || '').split(';').filter(Boolean)) await walk(extra, 2);
+  const roots = [];
+  const addRoot = (dir, depth) => { searched.push(dir); roots.push([dir, depth]); };
+  for (const extra of String(process.env.PROMEDPARA_LEGACY_DIRS || '').split(';').filter(Boolean)) addRoot(extra, deep ? 6 : 3);
   const systemDrive = process.env.SystemDrive || 'C:';
-  try { for (const user of fs.readdirSync(systemDrive + '\\Users')) for (const sub of ['Desktop', 'Documents', 'Downloads']) await walk(path.join(systemDrive + '\\Users', user, sub), 2); } catch { }
-  for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') { const rootDir = letter + ':\\'; if (fs.existsSync(rootDir)) await walk(rootDir, 2); }
-  await walk(path.dirname(LEGACY_EXPORT_PATH), 1);
+  try { for (const user of fs.readdirSync(systemDrive + '\\Users')) for (const sub of ['Desktop', 'Documents', 'Downloads']) addRoot(path.join(systemDrive + '\\Users', user, sub), deep ? 6 : 3); } catch { }
+  const drives = [];
+  for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') { const rootDir = letter + ':\\'; if (fs.existsSync(rootDir)) drives.push(rootDir); }
+  // find the old software itself (its install or data folder), then look inside it much more thoroughly
+  const appParents = [];
+  for (const drive of drives) { appParents.push(drive); appParents.push(path.join(drive, 'Program Files')); appParents.push(path.join(drive, 'Program Files (x86)')); appParents.push(path.join(drive, 'ProgramData')); }
+  for (const parent of appParents) {
+    let entries; try { entries = await fs.promises.readdir(parent, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) if (entry.isDirectory() && OLD_APP_FOLDER.test(entry.name) && !/promedpara/i.test(entry.name)) { const folder = path.join(parent, entry.name); oldApp.add(folder); addRoot(folder, 6); }
+  }
+  for (const drive of drives) addRoot(drive, deep ? 5 : 2);
+  addRoot(path.dirname(LEGACY_EXPORT_PATH), 3);
+  for (const [dir, depth] of roots) await walk(dir, depth);
   legacyFiles.clear();
-  const rank = ({ file, stat }) => (/^articles/i.test(path.basename(file)) ? 1e15 : 0) + stat.mtimeMs;
-  return [...found.values()].sort((x, y) => rank(y) - rank(x)).slice(0, 12).map(({ file, stat }) => {
+  const rank = ({ file, stat }) => (/^articles/i.test(path.basename(file)) ? 1e15 : 0) + (/(logica|export)/i.test(file) ? 1e14 : 0) + stat.mtimeMs;
+  const candidates = [...found.values()].sort((x, y) => rank(y) - rank(x)).slice(0, 12).map(({ file, stat }) => {
     const id = legacyIdOf(file); legacyFiles.set(id, file);
     return { id, fileName: path.basename(file), folder: path.dirname(file), size: stat.size, modifiedAt: stat.mtime.toISOString() };
   });
+  return { candidates, oldApp: [...oldApp].slice(0, 6), searched: [...new Set(searched)].slice(0, 20), deep: Boolean(deep), seconds: Math.round((Date.now() - started) / 100) / 10 };
 }
 // Only a path that the scan itself returned can be read (the browser never supplies a path).
 const chosenLegacyPath = id => {
@@ -341,7 +363,7 @@ const chosenLegacyPath = id => {
 async function api(request, response, url) {
   const route = url.pathname;
   if (route === '/api/status' && request.method === 'GET') return send(response, 200, { setupRequired: firstRun(), business: 'PromedPara', version: APP_VERSION, location: 'Errachidia, Maroc', ownerUrls:ownerUrls() });
-  if (route === '/api/legacy-export/scan' && request.method === 'GET') { requireOwner(request); return send(response, 200, { candidates: await scanLegacyExports() }); }
+  if (route === '/api/legacy-export/scan' && request.method === 'GET') { requireOwner(request); return send(response, 200, await scanLegacyExports(url.searchParams.get('deep') === '1')); }
   if (route === '/api/legacy-export' && request.method === 'GET') {
     requireOwner(request);
     const legacyPath = chosenLegacyPath(url.searchParams.get('id'));
