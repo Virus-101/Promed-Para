@@ -265,9 +265,11 @@ const totpAt = (secretHex, step) => {
   const binary = ((digest[offset] & 0x7f) << 24) | ((digest[offset + 1] & 0xff) << 16) | ((digest[offset + 2] & 0xff) << 8) | (digest[offset + 3] & 0xff);
   return String(binary % 1_000_000).padStart(6, '0');
 };
+const shopClock = () => new Intl.DateTimeFormat('fr-MA', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Casablanca' }).format(new Date());
 const createSession = user => {
   const token = randomBytes(32).toString('base64url');
   sessions.set(token, { userId: user.id, expires: Date.now() + 12 * 60 * 60_000 });
+  if (user.role === 'cashier') createNotification('Employé connecté', `${user.name} · a ouvert la caisse à ${shopClock()}`, 'staff');
   return { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 60 * 60}` };
 };
 
@@ -470,6 +472,8 @@ async function api(request, response, url) {
     return send(response, 201, { deviceId, secret, name:pairing.name, business:'PromedPara' });
   }
   if (route === '/api/logout' && request.method === 'POST') {
+    const ending = sessions.get(cookieToken(request)), who = ending && db.prepare('SELECT name,role FROM users WHERE id=?').get(ending.userId);
+    if (who && who.role === 'cashier') createNotification('Employé déconnecté', `${who.name} · a fermé la caisse à ${shopClock()}`, 'staff');
     sessions.delete(cookieToken(request));
     return send(response, 200, { ok: true }, { 'Set-Cookie': 'pp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
   }

@@ -57,8 +57,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        getWindow().setStatusBarColor(BG); getWindow().setNavigationBarColor(BG);
-        if (Build.VERSION.SDK_INT >= 23) getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        SystemBars.apply(this, GREEN, BG);
         if (prefs.getString("cookie", "").isEmpty() && prefs.getString("deviceToken", "").isEmpty()) showLogin(); else verifySession();
     }
 
@@ -93,7 +92,21 @@ public final class MainActivity extends Activity {
         Drawable d = icon(name, sizeDp, color); if (d == null) return;
         v.setCompoundDrawablesRelative(d, null, null, null); v.setCompoundDrawablePadding(dp(gapDp)); v.setGravity(Gravity.CENTER_VERTICAL);
     }
-    private ImageView iconView(String name, int sizeDp, int color) { ImageView v = new ImageView(this); Drawable d = icon(name, sizeDp, color); if (d != null) v.setImageDrawable(d); return v; }
+    /** Each dashboard icon keeps its own natural colour instead of one grey for all. */
+    private static int naturalColor(String name, int fallback) {
+        switch (name) {
+            case "trending_up": case "wifi": case "circle_check": case "check": return Color.rgb(20, 125, 82);
+            case "package": return Color.rgb(37, 99, 235);
+            case "triangle_alert": return Color.rgb(217, 119, 6);
+            case "truck": return Color.rgb(79, 70, 229);
+            case "receipt": return Color.rgb(13, 148, 136);
+            case "bell": return Color.rgb(202, 138, 4);
+            case "bell_off": return Color.rgb(148, 163, 184);
+            case "activity": return Color.rgb(219, 39, 119);
+            default: return fallback;
+        }
+    }
+    private ImageView iconView(String name, int sizeDp, int color) { ImageView v = new ImageView(this); Drawable d = icon(name, sizeDp, naturalColor(name, color)); if (d != null) v.setImageDrawable(d); return v; }
     private ImageView logoView(String name) { ImageView v = new ImageView(this); int id = res(name, "drawable"); if (id != 0) v.setImageResource(id); v.setAdjustViewBounds(true); v.setScaleType(ImageView.ScaleType.FIT_CENTER); return v; }
     private String appVersion() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
 
