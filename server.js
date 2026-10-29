@@ -265,7 +265,7 @@ const totpAt = (secretHex, step) => {
   const binary = ((digest[offset] & 0x7f) << 24) | ((digest[offset + 1] & 0xff) << 16) | ((digest[offset + 2] & 0xff) << 8) | (digest[offset + 3] & 0xff);
   return String(binary % 1_000_000).padStart(6, '0');
 };
-const shopClock = () => new Intl.DateTimeFormat('fr-MA', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Casablanca' }).format(new Date());
+const shopClock = () => { const now = new Date(); return String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'); };   // the till's own clock, same as its screen
 const createSession = user => {
   const token = randomBytes(32).toString('base64url');
   sessions.set(token, { userId: user.id, expires: Date.now() + 12 * 60 * 60_000 });
