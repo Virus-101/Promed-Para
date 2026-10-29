@@ -285,41 +285,51 @@ const createSession = user => {
 // ---- Detection of the previous software's product export (LOGICA writes "Articles_<date>...csv": Article, Famille, PRIX_A, PRIX_V, Qté, Alert)
 const legacyFiles = new Map();
 const legacyIdOf = file => createHash('sha256').update(file.toLowerCase()).digest('hex').slice(0, 12);
-function looksLikeLegacyExport(file) {
+const LEGACY_NAME_COLUMNS = ['article', 'designation', 'libelle', 'produit', 'nom'];
+const LEGACY_PRICE_COLUMNS = ['prixv', 'prixvente', 'prixa', 'prixachat', 'pv', 'pa', 'prix'];
+const normHeader = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// The first line must be a product-list header (a name column and a price column, at least 3 columns): notes and READMEs never match.
+async function looksLikeLegacyExport(file) {
   try {
-    const fd = fs.openSync(file, 'r'), buf = Buffer.alloc(4096), n = fs.readSync(fd, buf, 0, 4096, 0); fs.closeSync(fd);
-    const head = buf.slice(0, n), text = head.length > 1 && head[0] === 0xFF && head[1] === 0xFE ? head.toString('utf16le') : head.toString('latin1');
-    return /article/i.test(text) && /(prix_v|prix_a|famille)/i.test(text);
+    const handle = await fs.promises.open(file, 'r'), buf = Buffer.alloc(4096);
+    const { bytesRead } = await handle.read(buf, 0, 4096, 0); await handle.close();
+    const head = buf.slice(0, bytesRead), text = head.length > 1 && head[0] === 0xFF && head[1] === 0xFE ? head.toString('utf16le') : head.toString('latin1');
+    const first = text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] || '';
+    const delimiter = [';', ',', '\t'].sort((a, b) => first.split(b).length - first.split(a).length)[0];
+    const cells = first.split(delimiter).map(normHeader);
+    return cells.length >= 3 && cells.some(cell => LEGACY_NAME_COLUMNS.includes(cell)) && cells.some(cell => LEGACY_PRICE_COLUMNS.includes(cell));
   } catch { return false; }
 }
-function scanLegacyExports() {
+// Asynchronous on purpose: on the shop PC the scan can take seconds and the till must keep answering meanwhile.
+async function scanLegacyExports() {
   const started = Date.now(), found = new Map(); let visited = 0;
   const skipDir = /^(windows|program files|program files \(x86\)|programdata|\$recycle\.bin|system volume information|node_modules|promedpara|appdata|recovery|perflogs|msocache)$/i;
-  const walk = (dir, depth) => {
-    if (Date.now() - started > 5000 || visited > 8000) return;
-    let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  const walk = async (dir, depth) => {
+    if (Date.now() - started > 8000 || visited > 20000) return;
+    let entries; try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       if (entry.isFile()) {
         visited++;
         if (!/\.(csv|txt)$/i.test(entry.name)) continue;
         try {
-          const stat = fs.statSync(full);
-          if (stat.size > 0 && stat.size <= 20 * 1024 * 1024 && (/^articles/i.test(entry.name) || looksLikeLegacyExport(full))) found.set(full.toLowerCase(), { file: full, stat });
+          const stat = await fs.promises.stat(full);
+          if (stat.size > 0 && stat.size <= 20 * 1024 * 1024 && await looksLikeLegacyExport(full)) found.set(full.toLowerCase(), { file: full, stat });
         } catch { }
-      } else if (entry.isDirectory() && depth > 0 && !skipDir.test(entry.name)) walk(full, depth - 1);
+      } else if (entry.isDirectory() && depth > 0 && !skipDir.test(entry.name)) await walk(full, depth - 1);
     }
   };
+  for (const extra of String(process.env.PROMEDPARA_LEGACY_DIRS || '').split(';').filter(Boolean)) await walk(extra, 2);
   const systemDrive = process.env.SystemDrive || 'C:';
-  try { for (const user of fs.readdirSync(systemDrive + '\\Users')) for (const sub of ['Desktop', 'Documents', 'Downloads']) walk(path.join(systemDrive + '\\Users', user, sub), 2); } catch { }
-  for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') { const root = letter + ':\\'; if (fs.existsSync(root)) walk(root, 2); }
-  walk(path.dirname(LEGACY_EXPORT_PATH), 1);
+  try { for (const user of fs.readdirSync(systemDrive + '\\Users')) for (const sub of ['Desktop', 'Documents', 'Downloads']) await walk(path.join(systemDrive + '\\Users', user, sub), 2); } catch { }
+  for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') { const rootDir = letter + ':\\'; if (fs.existsSync(rootDir)) await walk(rootDir, 2); }
+  await walk(path.dirname(LEGACY_EXPORT_PATH), 1);
   legacyFiles.clear();
-  const list = [...found.values()].sort((x, y) => y.stat.mtimeMs - x.stat.mtimeMs).slice(0, 12).map(({ file, stat }) => {
+  const rank = ({ file, stat }) => (/^articles/i.test(path.basename(file)) ? 1e15 : 0) + stat.mtimeMs;
+  return [...found.values()].sort((x, y) => rank(y) - rank(x)).slice(0, 12).map(({ file, stat }) => {
     const id = legacyIdOf(file); legacyFiles.set(id, file);
     return { id, fileName: path.basename(file), folder: path.dirname(file), size: stat.size, modifiedAt: stat.mtime.toISOString() };
   });
-  return list;
 }
 // Only a path that the scan itself returned can be read (the browser never supplies a path).
 const chosenLegacyPath = id => {
@@ -331,7 +341,7 @@ const chosenLegacyPath = id => {
 async function api(request, response, url) {
   const route = url.pathname;
   if (route === '/api/status' && request.method === 'GET') return send(response, 200, { setupRequired: firstRun(), business: 'PromedPara', version: APP_VERSION, location: 'Errachidia, Maroc', ownerUrls:ownerUrls() });
-  if (route === '/api/legacy-export/scan' && request.method === 'GET') { requireOwner(request); return send(response, 200, { candidates: scanLegacyExports() }); }
+  if (route === '/api/legacy-export/scan' && request.method === 'GET') { requireOwner(request); return send(response, 200, { candidates: await scanLegacyExports() }); }
   if (route === '/api/legacy-export' && request.method === 'GET') {
     requireOwner(request);
     const legacyPath = chosenLegacyPath(url.searchParams.get('id'));

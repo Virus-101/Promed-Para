@@ -43,6 +43,13 @@ process.on('uncaughtException', e => log('uncaughtException: ' + (e && e.stack |
 // Weak machine (2 GB, no GPU acceleration): software rendering, no extras.
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
+// the shop PC is a low-end machine (2 GB RAM, Celeron): fewer processes, a smaller script heap, no background work
+app.commandLine.appendSwitch('enable-low-end-device-mode');
+app.commandLine.appendSwitch('renderer-process-limit', '1');
+app.commandLine.appendSwitch('disable-site-isolation-trials');
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=192');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,MediaRouter,Translate,OptimizationHints,AutofillServerCommunication');
+app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('overscroll-history-navigation', '0');
 
 if (!app.requestSingleInstanceLock()) { app.quit(); return; }
