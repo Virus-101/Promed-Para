@@ -40,6 +40,18 @@ const server = http.createServer(async (req, res) => {
     const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
     if (req.method === 'GET' && parts.length === 0) return send(res, 200, { ok: true, service: 'promedpara-relay', tills: tills.size });
 
+    // ---- QR landing page: a phone camera opens this link, which hands the login over to the worker app
+    if (parts[0] === 'w' && parts.length === 1 && req.method === 'GET') {
+      const page = '<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PromedPara</title>'
+        + '<style>body{font-family:system-ui,sans-serif;background:#000;color:#fff;margin:0;min-height:100vh;display:grid;place-items:center;text-align:center;padding:24px}a{display:inline-block;margin-top:18px;padding:14px 22px;border-radius:12px;background:#fff;color:#000;font-weight:700;text-decoration:none}</style></head>'
+        + '<body><main><h1>Connexion à la caisse</h1><p id="m">Ouverture de PromedPara Worker…</p><a id="go" href="#">Ouvrir PromedPara Worker</a></main>'
+        + '<script>(function(){var q=location.search.replace(/^\\?/,"");var scheme="promedpara://login?"+q;var intent="intent://login?"+q+"#Intent;scheme=promedpara;package=ma.promedpara.worker;end";'
+        + 'var go=document.getElementById("go");go.href=/Android/i.test(navigator.userAgent)?intent:scheme;'
+        + 'setTimeout(function(){location.href=go.href},300);setTimeout(function(){document.getElementById("m").textContent="Si rien ne s\'ouvre, touchez le bouton. L\'application PromedPara Worker doit être installée sur ce téléphone."},2500);})();</script></body></html>';
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+      return res.end(page);
+    }
+
     // ---- till side
     if (parts[0] === 't' && ID.test(parts[1] || '')) {
       const id = parts[1];

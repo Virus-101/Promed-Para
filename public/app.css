@@ -27,3 +27,6 @@
 .wizard-modes button small{color:#5b6b61;font-size:12px}
 .wizard-modes button.on{border-color:#1b6b45;background:#eef6f1;box-shadow:0 0 0 2px rgba(27,107,69,.12)}
 .wizard-copy{margin:-6px 0 10px}
+
+.qr-box{background:#fff;border:1px solid #d3ddd6;border-radius:16px;padding:14px;max-width:270px;margin:14px auto;display:grid;place-items:center;min-height:200px}
+.qr-box svg{width:100%;height:auto;display:block}

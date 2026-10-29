@@ -42,6 +42,7 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends Activity {
     static final String PREFS = "promedpara_owner";
     static final String ACTION_EVENT = "ma.promedpara.owner.EVENT";
+    private static final int HEADER = Color.rgb(0, 0, 0);   // black header: the logo shows in pure black and white
     private static final int GREEN = Color.rgb(23, 61, 44), GREEN_BRIGHT = Color.rgb(20, 125, 82), BG = Color.rgb(245, 247, 243), INK = Color.rgb(25, 48, 36), MUTED = Color.rgb(94, 110, 100), LINE = Color.rgb(220, 229, 220), SOFT = Color.rgb(194, 222, 202);
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private SharedPreferences prefs;
@@ -57,7 +58,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        SystemBars.apply(this, GREEN, BG);
+        SystemBars.apply(this, HEADER, BG);
         if (prefs.getString("cookie", "").isEmpty() && prefs.getString("deviceToken", "").isEmpty()) showLogin(); else verifySession();
     }
 
@@ -114,7 +115,7 @@ public final class MainActivity extends Activity {
         root = column(); root.setBackgroundColor(BG);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.addView(root);
         setContentView(scroll);
-        LinearLayout header = column(); pad(header,22,hero?30:24,22,18); header.setBackgroundColor(GREEN);
+        LinearLayout header = column(); pad(header,22,hero?30:24,22,18); header.setBackgroundColor(HEADER);
         if (hero) { header.addView(logoView("logo_full_light"), lp(150,-2)); }
         else { LinearLayout brand = row(); brand.addView(logoView("logo_mark_light"), lp(40,-2)); TextView name = text("PROMED  ·  PARAPHARMACIE",12,SOFT,true); name.setPadding(dp(11),0,0,0); name.setLetterSpacing(.06f); brand.addView(name); header.addView(brand); }
         TextView small = text(eyebrow.toUpperCase(),11,SOFT,true); LinearLayout.LayoutParams sm=lp(-2,-2); sm.topMargin=dp(hero?22:26); header.addView(small,sm);

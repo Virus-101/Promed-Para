@@ -7,6 +7,7 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 
+const WORKER_ALLOWED = [['POST', '/api/qr-login/approve']];
 const ALLOWED = [['POST', '/api/owner/device-login'], ['POST', '/api/owner/device-logout'], ['GET', '/api/overview'], ['GET', '/api/notifications'], ['GET', '/api/me'], ['POST', '/api/logout']];
 const MAX_SKEW_MS = 5 * 60000;
 
@@ -33,8 +34,9 @@ function start(options) {
     fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
   }
   if (options.defaultUrl && !cfg.url) { cfg.url = options.defaultUrl; fs.writeFileSync(file, JSON.stringify(cfg, null, 2)); }
-  const key = Buffer.from(cfg.key, 'hex');
-  const state = { enabled: cfg.enabled !== false && Boolean(cfg.url), connected: false, lastOk: 0, url: cfg.url || '', tillId: cfg.tillId, address: '', stop: function () {} };
+  if (!/^[a-f0-9]{64}$/.test(cfg.wkey || '')) { cfg.wkey = crypto.randomBytes(32).toString('hex'); fs.writeFileSync(file, JSON.stringify(cfg, null, 2)); }
+  const key = Buffer.from(cfg.key, 'hex'), workerKey = Buffer.from(cfg.wkey, 'hex');
+  const state = { enabled: cfg.enabled !== false && Boolean(cfg.url), connected: false, lastOk: 0, url: cfg.url || '', tillId: cfg.tillId, workerKey: cfg.wkey, address: '', stop: function () {} };
   const seen = new Map(), secret = crypto.randomBytes(16).toString('hex');
   let stopped = false;
   if (!state.enabled) return state;
@@ -80,6 +82,8 @@ function start(options) {
     try { message = JSON.parse(item.body); } catch (error) { message = null; }
     if (message && message.m === 'k') {
       try { plain = open(key, message.d); usedKey = key; } catch (error) { plain = null; }
+    } else if (message && message.m === 'w') {
+      try { plain = open(workerKey, message.d); usedKey = workerKey; } catch (error) { plain = null; }
     } else if (message && message.m === 'e') {
       for (const code of options.activeCodes()) {
         try { const k = enrollKey(code, cfg.tillId); plain = open(k, message.d); usedKey = k; break; } catch (error) { plain = null; }
@@ -94,8 +98,9 @@ function start(options) {
       for (const entry of Array.from(seen.entries())) if (now - entry[1] > MAX_SKEW_MS * 2) seen.delete(entry[0]);
       const fresh = Boolean(request) && typeof request.n === 'string' && request.n.length >= 8 && !seen.has(request.n) && Math.abs(now - Number(request.t)) < MAX_SKEW_MS;
       const method = request ? String(request.x || '').toUpperCase() : '', requestPath = request ? String(request.p || '').split('?')[0] : '';
-      const enrolling = message.m === 'e' && method === 'POST' && requestPath === '/api/owner/enroll';
-      const allowed = enrolling || (message.m === 'k' && ALLOWED.some(rule => rule[0] === method && rule[1] === requestPath));
+      const enrollingWorker = message.m === 'e' && method === 'POST' && requestPath === '/api/worker/enroll';
+      const enrolling = enrollingWorker || (message.m === 'e' && method === 'POST' && requestPath === '/api/owner/enroll');
+      const allowed = enrolling || (message.m === 'k' && ALLOWED.some(rule => rule[0] === method && rule[1] === requestPath)) || (message.m === 'w' && WORKER_ALLOWED.some(rule => rule[0] === method && rule[1] === requestPath));
       let reply;
       if (!fresh) reply = { s: 400, c: '', b: JSON.stringify({ error: 'Requête expirée ou rejouée.' }) };
       else if (!allowed) reply = { s: 403, c: '', b: JSON.stringify({ error: 'Non autorisé à distance.' }) };
@@ -103,7 +108,7 @@ function start(options) {
         seen.set(request.n, now);
         reply = await forward(method, String(request.p), String(request.c || ''), request.b ? String(request.b) : '');
         if (enrolling && (reply.s === 200 || reply.s === 201)) {
-          try { const data = JSON.parse(reply.b); data.key = cfg.key; data.tillId = cfg.tillId; reply.b = JSON.stringify(data); } catch (error) { /* keep as is */ }
+          try { const data = JSON.parse(reply.b); data.key = enrollingWorker ? cfg.wkey : cfg.key; data.tillId = cfg.tillId; reply.b = JSON.stringify(data); } catch (error) { /* keep as is */ }
         }
       }
       answer = JSON.stringify({ d: seal(usedKey, JSON.stringify({ n: request ? request.n : '', s: reply.s, c: reply.c, b: reply.b })) });

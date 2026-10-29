@@ -47,7 +47,7 @@ const write = (file, data) => { fs.mkdirSync(path.dirname(file), { recursive: tr
   for (const [app, res] of Object.entries(APPS)) {
     fs.rmSync(res, { recursive: true, force: true });
     // adaptive launcher icon (Android 8+, and a themed monochrome layer on Android 13+)
-    write(path.join(res, 'values', 'colors.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n  <color name="ic_launcher_background">#1B4D33</color>\n</resources>\n');
+    write(path.join(res, 'values', 'colors.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n  <color name="ic_launcher_background">#000000</color>\n</resources>\n');
     write(path.join(res, 'mipmap-anydpi-v26', 'ic_launcher.xml'), '<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n  <background android:drawable="@color/ic_launcher_background" />\n  <foreground android:drawable="@mipmap/ic_launcher_foreground" />\n  <monochrome android:drawable="@mipmap/ic_launcher_monochrome" />\n</adaptive-icon>\n');
     for (const [name, scale] of Object.entries(DENSITIES)) {
       const canvas = Math.round(108 * scale), markWidth = Math.round(canvas * 0.56);

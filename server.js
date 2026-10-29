@@ -250,6 +250,8 @@ const isLoopback = address => address === '127.0.0.1' || address === '::1' || ad
 // requests that arrive through the internet relay come from 127.0.0.1 too, but carry this header: they are never the till itself
 const isLocal = request => isLoopback(request.socket.remoteAddress) && !request.headers['x-promed-relay'];
 const livePairingCodes = new Map();
+// QR login: the till shows a QR code, the worker's paired phone approves it with a proof only that phone can compute
+const qrChallenges = new Map(), qrById = new Map();
 const activePairingCodes = () => { const now = Date.now(); for (const [code, until] of livePairingCodes) if (until < now) livePairingCodes.delete(code); return Array.from(livePairingCodes.keys()); };
 let remoteLink = { enabled: false, connected: false, address: '' };
 const ownerUrls = () => ['127.0.0.1','localhost','::1'].includes(HOST) ? [] : Object.values(os.networkInterfaces()).flat().filter(item=>item?.family==='IPv4'&&!item.internal&&!item.address.startsWith('169.254.')).map(item=>`http://${item.address}:${PORT}`);
@@ -378,6 +380,42 @@ async function api(request, response, url) {
     const token = randomBytes(32).toString('base64url'); sessions.set(token, { userId: user.id, expires: Date.now() + 30 * 86400_000 });
     return send(response, 200, { user: userSafe(user) }, { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 86400}` });
   }
+  if (route === '/api/qr-login/start' && request.method === 'POST') {
+    if (!isLocal(request)) throw new HttpError(403, 'Réservé à la caisse.');
+    rateLimit(request, 'qr-start', 40);
+    const now = Date.now();
+    for (const [nonce, entry] of Array.from(qrChallenges.entries())) if (entry.expires < now) { qrChallenges.delete(nonce); qrById.delete(entry.id); }
+    if (qrChallenges.size >= 40) { const oldest = qrChallenges.keys().next().value; qrById.delete(qrChallenges.get(oldest).id); qrChallenges.delete(oldest); }
+    const id = randomBytes(6).toString('hex'), nonce = randomBytes(8).toString('hex'), local = ownerUrls()[0] || '';
+    const entry = { id, nonce, expires: now + 90_000, userId: null };
+    qrChallenges.set(nonce, entry); qrById.set(id, entry);
+    const query = 'c=' + nonce + (local ? '&l=' + encodeURIComponent(local) : '');
+    const payload = remoteLink.enabled ? remoteLink.url.replace(/\/$/, '') + '/w?t=' + remoteLink.tillId + '&' + query : 'promedpara://login?' + query;
+    return send(response, 200, { id, payload, expiresIn: 90 });
+  }
+  const qrPoll = route.match(/^\/api\/qr-login\/([a-f0-9]{12})$/);
+  if (qrPoll && request.method === 'GET') {
+    if (!isLocal(request)) throw new HttpError(403, 'Réservé à la caisse.');
+    const entry = qrById.get(qrPoll[1]);
+    if (!entry || entry.expires < Date.now()) return send(response, 410, { error: 'Code expiré.' });
+    if (!entry.userId) return send(response, 200, { pending: true });
+    qrChallenges.delete(entry.nonce); qrById.delete(entry.id);
+    const account = db.prepare('SELECT id,name,username,role,can_receive_stock FROM users WHERE id=? AND active=1').get(entry.userId);
+    if (!account) throw new HttpError(401, 'Compte désactivé.');
+    return send(response, 200, { user: userSafe(account) }, createSession(account));
+  }
+  if (route === '/api/qr-login/approve' && request.method === 'POST') {
+    rateLimit(request, 'qr-approve', 30);
+    const body = await readBody(request), deviceId = clean(body.deviceId, 20), nonce = clean(body.c, 40), proof = clean(body.proof, 80);
+    const entry = qrChallenges.get(nonce);
+    if (!entry || entry.expires < Date.now() || entry.userId) throw new HttpError(410, 'Code expiré. Scannez le nouveau QR code.');
+    const device = db.prepare("SELECT d.secret_hex,u.id,u.name FROM worker_devices d JOIN users u ON u.id=d.user_id WHERE d.id=? AND d.active=1 AND u.active=1 AND u.role='cashier'").get(deviceId);
+    const expected = device ? createHmac('sha256', Buffer.from(device.secret_hex, 'hex')).update('qr:' + nonce + ':' + deviceId).digest('hex') : '';
+    if (!device || proof.length !== expected.length || !timingSafeEqual(Buffer.from(proof), Buffer.from(expected))) throw new HttpError(401, 'Téléphone non reconnu.');
+    entry.userId = device.id;
+    db.prepare('UPDATE worker_devices SET last_seen_at=? WHERE id=?').run(isoNow(), deviceId);
+    return send(response, 200, { ok: true, name: device.name });
+  }
   if (route === '/api/worker/scan-login' && request.method === 'POST') {
     rateLimit(request, 'worker-scan', 20);
     const body = await readBody(request), code = clean(body.code, 40).toUpperCase().replace(/^\*|\*$/g, '');
@@ -475,7 +513,7 @@ async function api(request, response, url) {
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
     createNotification('Badge employé associé', `${pairing.name} · téléphone ajouté`, 'security');
-    return send(response, 201, { deviceId, secret, name:pairing.name, business:'PromedPara' });
+    return send(response, 201, { deviceId, secret, name:pairing.name, business:'PromedPara', relay: remoteLink.enabled ? { base: remoteLink.url.replace(/\/$/, ''), tillId: remoteLink.tillId, key: remoteLink.workerKey } : null });
   }
   if (route === '/api/logout' && request.method === 'POST') {
     const ending = sessions.get(cookieToken(request)), who = ending && db.prepare('SELECT name,role FROM users WHERE id=?').get(ending.userId);
@@ -865,7 +903,8 @@ async function api(request, response, url) {
     const code=randomBytes(8).toString('hex').slice(0,12).toUpperCase(), createdAt=isoNow(), expiresAt=new Date(Date.now()+5*60_000).toISOString();
     db.prepare('DELETE FROM worker_pairings WHERE user_id=? OR expires_at<=?').run(userId,createdAt);
     db.prepare('INSERT INTO worker_pairings(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)').run(sha256(code),userId,expiresAt,createdAt);
-    return send(response,201,{code,expiresAt,serverUrls:ownerUrls(),workerUrls:ownerUrls().map(url=>`${url}/worker`),workerApkUrls:ownerUrls().map(url=>`${url}/PromedPara-Worker.apk`)});
+    livePairingCodes.set(code, Date.now() + 5 * 60_000);
+    return send(response,201,{code,expiresAt,remote: remoteLink.enabled ? { address: remoteLink.address, connected: remoteLink.connected } : null,serverUrls:ownerUrls(),workerUrls:ownerUrls().map(url=>`${url}/worker`),workerApkUrls:ownerUrls().map(url=>`${url}/PromedPara-Worker.apk`)});
   }
   const recoveryMatch=route.match(/^\/api\/team\/([^/]+)\/recovery-code$/);
   if(recoveryMatch&&request.method==='POST'){
