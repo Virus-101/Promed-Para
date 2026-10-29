@@ -364,6 +364,7 @@ document.addEventListener('change',event=>{
   if(action==='confirm-import-review'){preview.confirmed=event.target.checked;renderApp();}
 });
 document.addEventListener('input',event=>{
+  if(event.target.id==='rk'){const raw=event.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,16);event.target.value=raw.replace(/(.{4})(?=.)/g,'$1-');}
   if(event.target.id==='search'){state.query=event.target.value;const cursor=event.target.selectionStart;renderApp();const input=document.querySelector('#search');input?.focus();input?.setSelectionRange(cursor,cursor);}
   if(event.target.id==='stock-filter'){state.stockQuery=event.target.value;const cursor=event.target.selectionStart;renderApp();const input=document.querySelector('#stock-filter');input?.focus();input?.setSelectionRange(cursor,cursor);}
   if(event.target.id==='cash-received')state.cashReceived=event.target.value;

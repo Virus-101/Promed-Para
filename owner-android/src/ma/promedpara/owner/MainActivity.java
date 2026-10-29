@@ -110,6 +110,8 @@ public final class MainActivity extends Activity {
         root.addView(header);
     }
 
+  /** Shows a pairing code as XXXX XXXX XXXX while it is typed or pasted, so nobody has to type the spaces. */
+  static void groupCode(final android.widget.EditText e){e.addTextChangedListener(new android.text.TextWatcher(){boolean busy;public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){}public void afterTextChanged(android.text.Editable ed){if(busy)return;busy=true;String raw=ed.toString().replaceAll("[^A-Fa-f0-9]","").toUpperCase(java.util.Locale.ROOT);if(raw.length()>12)raw=raw.substring(0,12);StringBuilder sb=new StringBuilder();for(int i=0;i<raw.length();i++){if(i>0&&i%4==0)sb.append(' ');sb.append(raw.charAt(i));}String out=sb.toString();if(!out.equals(ed.toString()))ed.replace(0,ed.length(),out);busy=false;}});}
     private EditText field(String hint, int inputType) {
         EditText e = new EditText(this); e.setSingleLine(true); e.setTextSize(16); e.setHint(hint); e.setInputType(inputType); e.setTextColor(INK); e.setHintTextColor(MUTED); e.setBackground(shape(Color.WHITE,LINE,11)); pad(e,13,2,13,2); return e;
     }
@@ -128,7 +130,7 @@ public final class MainActivity extends Activity {
         card.addView(label("ADRESSE DU POSTE DE CAISSE"));
         serverField=field("http://192.168.1.10:4173",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI); serverField.setText(prefs.getString("server","")); card.addView(serverField,lp(-1,54));
         TextView note=text("Affichée par la caisse, dans la fenêtre « Associer le téléphone ».",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
-        card.addView(label("CODE D’ASSOCIATION (12 CARACTÈRES)")); codeField=field("XXXX XXXX XXXX",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); codeField.setLetterSpacing(.12f); card.addView(codeField,lp(-1,56));
+        card.addView(label("CODE D’ASSOCIATION (12 CARACTÈRES)")); codeField=field("XXXX XXXX XXXX",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); codeField.setLetterSpacing(.12f); groupCode(codeField); card.addView(codeField,lp(-1,56));
         Button pair=button("Associer ce téléphone",true,"smartphone",this::pair); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
         LinearLayout steps=column(); pad(steps,19,14,19,14); steps.setBackground(shape(Color.rgb(233,243,236),0,14)); LinearLayout.LayoutParams stp=lp(-1,-2); stp.setMargins(dp(16),0,dp(16),dp(12)); root.addView(steps,stp);
         TextView st=text("Comment obtenir le code ?",13,INK,true); steps.addView(st);
