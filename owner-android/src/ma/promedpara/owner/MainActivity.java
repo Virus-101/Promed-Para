@@ -146,10 +146,33 @@ public final class MainActivity extends Activity {
         TextView note=text("Dans la fenêtre « Connecter mon téléphone » de la caisse : adresse locale (Wi‑Fi) ou adresse internet (https://…) pour fonctionner sans Wi‑Fi.",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
         card.addView(label("CODE D’ASSOCIATION (12 CARACTÈRES)")); codeField=field("XXXX XXXX XXXX",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); codeField.setLetterSpacing(.12f); groupCode(codeField); card.addView(codeField,lp(-1,56));
         Button pair=button("Associer ce téléphone",true,"smartphone",this::pair); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
+        Button ring=button("Demander un code à l’administrateur",false,"bell",this::askAdminForCode); LinearLayout.LayoutParams rp=lp(-1,54); rp.topMargin=dp(10); card.addView(ring,rp);
         LinearLayout steps=column(); pad(steps,19,14,19,14); steps.setBackground(shape(Color.rgb(233,243,236),0,14)); LinearLayout.LayoutParams stp=lp(-1,-2); stp.setMargins(dp(16),0,dp(16),dp(12)); root.addView(steps,stp);
         TextView st=text("Comment obtenir le code ?",13,INK,true); steps.addView(st);
         TextView how=text("Sur la caisse : bouton « Connecter mon téléphone ». Le code est valable cinq minutes et ne sert qu’une fois. Ensuite le téléphone reste associé : plus besoin de code ni de mot de passe.",12,MUTED,false); how.setLineSpacing(dp(3),1f); LinearLayout.LayoutParams hw=lp(-1,-2); hw.topMargin=dp(5); steps.addView(how,hw);
         TextView foot=text("Données et base SQLite conservées sur le poste. Connexion locale uniquement.  ·  Version "+appVersion(),12,MUTED,false); foot.setGravity(Gravity.CENTER); LinearLayout.LayoutParams fp=lp(-1,-2); fp.setMargins(dp(28),dp(6),dp(28),dp(22)); root.addView(foot,fp);
+    }
+
+    /** The owner cannot sign in at the till: ring the administrator, whose phone gets a notification with a request for a code. */
+    private void askAdminForCode() {
+        final String base = normalize(serverField.getText().toString());
+        if (base.isEmpty()) { toast("Entrez d’abord l’adresse de la caisse que l’administrateur vous a envoyée."); return; }
+        final EditText who = new EditText(this); who.setHint("Votre nom"); who.setSingleLine(true);
+        new android.app.AlertDialog.Builder(this).setTitle("Demander un code à l’administrateur")
+            .setMessage("L’administrateur reçoit une notification avec votre nom et vous envoie un code d’association.").setView(who)
+            .setNegativeButton("Annuler", null)
+            .setPositiveButton("Envoyer", (d, w) -> {
+                final String name = who.getText().toString().trim();
+                if (name.length() < 2) { toast("Indiquez votre nom."); return; }
+                setBusy(true);
+                io.execute(() -> {
+                    try {
+                        Result result = Relay.isRelayAddress(base) ? Relay.ring(base, name) : request(base + "/api/ring", "POST", null, new JSONObject().put("name", name).toString());
+                        if (result.status < 200 || result.status >= 300) throw new Exception(new JSONObject(result.body).optString("error", "Demande refusée."));
+                        runOnUiThread(() -> { setBusy(false); toast("L’administrateur a été prévenu. Attendez son code."); });
+                    } catch (Exception e) { runOnUiThread(() -> { setBusy(false); toast(message(e)); }); }
+                });
+            }).show();
     }
 
     private void pair() {

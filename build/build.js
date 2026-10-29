@@ -94,7 +94,6 @@ if (fs.existsSync(KIT)) copyDir(KIT, OUT);
 // Logo at the top of the guide (embedded, so it also prints/opens offline)
 try { const guide = path.join(OUT, 'GUIDE.html'); const logoB64 = fs.readFileSync(path.join(__dirname, 'assets', 'guide-logo.png')).toString('base64'); fs.writeFileSync(guide, fs.readFileSync(guide, 'utf8').replace('<!--LOGO-->', '<img src="data:image/png;base64,' + logoB64 + '" alt="Promed Parapharmacie" style="width:200px;height:auto;display:block;margin:0 0 6px">')); } catch (e) { console.warn('guide logo skipped:', e.message); }
 copyDir(path.join(SRC, 'owner-android'), path.join(OUT, 'android-source', 'owner-android'), n => n === 'build');
-copyDir(path.join(SRC, 'worker-android'), path.join(OUT, 'android-source', 'worker-android'), n => n === 'build');
 fs.mkdirSync(path.join(OUT, 'android'), { recursive: true });
 for (const apk of ['PromedPara-Owner.apk']) fs.copyFileSync(path.join(SRC, 'public', apk), path.join(OUT, 'android', apk));
 

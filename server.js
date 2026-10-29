@@ -252,6 +252,7 @@ const isLocal = request => isLoopback(request.socket.remoteAddress) && !request.
 const livePairingCodes = new Map();
 // QR login: the till shows a QR code, the worker's paired phone approves it with a proof only that phone can compute
 const qrChallenges = new Map(), qrById = new Map();
+let ringTimes = [];
 const activePairingCodes = () => { const now = Date.now(); for (const [code, until] of livePairingCodes) if (until < now) livePairingCodes.delete(code); return Array.from(livePairingCodes.keys()); };
 let remoteLink = { enabled: false, connected: false, address: '' };
 const ownerUrls = () => ['127.0.0.1','localhost','::1'].includes(HOST) ? [] : Object.values(os.networkInterfaces()).flat().filter(item=>item?.family==='IPv4'&&!item.internal&&!item.address.startsWith('169.254.')).map(item=>`http://${item.address}:${PORT}`);
@@ -379,6 +380,18 @@ async function api(request, response, url) {
     if (!allowed) throw new HttpError(401, 'Nom ou code incorrect.');
     const token = randomBytes(32).toString('base64url'); sessions.set(token, { userId: user.id, expires: Date.now() + 30 * 86400_000 });
     return send(response, 200, { user: userSafe(user) }, { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 86400}` });
+  }
+  if (route === '/api/ring' && request.method === 'POST') {
+    // an owner who cannot sign in asks the administrator for a code: no account needed, but strictly rate-limited
+    rateLimit(request, 'ring', 4);
+    const now = Date.now();
+    ringTimes = ringTimes.filter(at => now - at < 3600_000);
+    if (ringTimes.length >= 6) throw new HttpError(429, 'Trop de demandes. Réessayez dans une heure ou appelez l’administrateur.');
+    const body = await readBody(request), who = clean(body.name, 60).replace(/[\r\n]+/g, ' ');
+    if (who.length < 2) throw new HttpError(400, 'Indiquez votre nom.');
+    ringTimes.push(now);
+    createNotification('Demande de code', who + ' demande un code d’association pour son téléphone. Comptes équipe → sa fiche → Associer le téléphone.', 'security');
+    return send(response, 200, { ok: true });
   }
   if (route === '/api/qr-login/start' && request.method === 'POST') {
     if (!isLocal(request)) throw new HttpError(403, 'Réservé à la caisse.');

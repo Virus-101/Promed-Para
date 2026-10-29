@@ -54,4 +54,4 @@ function build(app) {
 }
 
 fs.writeFileSync(path.join(root, 'public', 'android-version.json'), JSON.stringify({ versionCode: Number(versionCode), versionName }));
-for (const app of which === 'both' ? ['owner', 'worker'] : [which]) build(app);
+for (const app of [which]) build(app);

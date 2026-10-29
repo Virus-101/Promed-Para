@@ -89,6 +89,14 @@ function start(options) {
         try { const k = enrollKey(code, cfg.tillId); plain = open(k, message.d); usedKey = k; break; } catch (error) { plain = null; }
       }
     }
+    if (message && message.m === 'r') {
+      // "ring the administrator": needs no key (the phone has none yet), only this single route
+      let ask = {};
+      try { ask = { name: String(message.name || '').slice(0, 60) }; } catch (error) { ask = {}; }
+      const reply = await forward('POST', '/api/ring', '', JSON.stringify(ask));
+      try { await call('POST', '/t/' + cfg.tillId + '/res/' + item.id, JSON.stringify({ r: { s: reply.s, b: reply.b } }), 15000); } catch (error) { /* the phone will retry */ }
+      return;
+    }
     let answer;
     if (!plain) {
       answer = JSON.stringify({ e: 'auth' });

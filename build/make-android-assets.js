@@ -8,7 +8,7 @@ const sharp = require('sharp');
 const ROOT = path.resolve(__dirname, '..');
 const IMG = path.join(ROOT, 'public', 'img');
 const LUCIDE = path.join(__dirname, 'node_modules', 'lucide-static', 'icons');
-const APPS = { owner: path.join(ROOT, 'owner-android', 'res'), worker: path.join(ROOT, 'worker-android', 'res') };
+const APPS = { owner: path.join(ROOT, 'owner-android', 'res') };
 const ICONS = ['refresh-cw', 'log-out', 'bell', 'bell-off', 'trending-up', 'package', 'triangle-alert', 'wifi', 'truck', 'activity', 'smartphone', 'scan-barcode', 'key-round', 'check', 'circle-check', 'shield-check', 'receipt', 'clock', 'lock-keyhole', 'refresh-cw'];
 const DENSITIES = { mdpi: 1, hdpi: 1.5, xhdpi: 2, xxhdpi: 3, xxxhdpi: 4 };
 

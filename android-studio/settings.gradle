@@ -2,6 +2,4 @@ pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal()
 dependencyResolutionManagement { repositories { google(); mavenCentral() } }
 rootProject.name = "PromedPara-Android"
 include ':owner'
-include ':worker'
 project(':owner').projectDir = file('../owner-android')
-project(':worker').projectDir = file('../worker-android')

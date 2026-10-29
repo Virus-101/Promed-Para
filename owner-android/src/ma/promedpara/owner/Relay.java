@@ -46,6 +46,24 @@ final class Relay {
         return send(address, "e", key, "POST", "/api/owner/enroll", "", json);
     }
 
+    /** An owner who cannot sign in asks the administrator for a code (no key needed: the till only turns it into a notification). */
+    static MainActivity.Result ring(String address, String name) throws Exception {
+        String body = new JSONObject().put("m", "r").put("name", name).toString();
+        HttpURLConnection c = (HttpURLConnection) new URL(relayBase(address) + "/p/" + tillId(address)).openConnection();
+        c.setRequestMethod("POST"); c.setConnectTimeout(12000); c.setReadTimeout(40000); c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Connection", "close");
+        try (OutputStream out = c.getOutputStream()) { out.write(body.getBytes(StandardCharsets.UTF_8)); }
+        int status = c.getResponseCode();
+        InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        if (in != null) { byte[] chunk = new byte[4096]; int n; while ((n = in.read(chunk)) != -1) buffer.write(chunk, 0, n); in.close(); }
+        c.disconnect();
+        if (status == 503) throw new Exception("La caisse est hors ligne (éteinte ou sans internet).");
+        if (status != 200) throw new Exception("Liaison internet indisponible (" + status + ").");
+        JSONObject reply = new JSONObject(new String(buffer.toByteArray(), StandardCharsets.UTF_8)).getJSONObject("r");
+        return new MainActivity.Result(reply.optInt("s", 500), reply.optString("b", ""), "");
+    }
+
     private static MainActivity.Result send(String address, String mode, byte[] key, String method, String path, String cookie, String json) throws Exception {
         String nonce = randomHex(8);
         JSONObject plain = new JSONObject().put("n", nonce).put("t", System.currentTimeMillis()).put("x", method).put("p", path).put("c", cookie == null ? "" : cookie).put("b", json == null ? "" : json);
