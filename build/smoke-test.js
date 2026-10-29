@@ -141,7 +141,7 @@ const totp = (secretHex, step) => {
   const fatimaPin = r.json.pin;
   r = await boss('POST', '/api/team', { name: 'Fatima Zahra', role: 'cashier', pin: '864209' }); ok('wizard: same name gets a unique username and keeps the chosen code', r.status === 201 && r.json.user.username === 'fatimazahra2' && r.json.pin === undefined, r);
   r = await boss('POST', '/api/team', { name: 'Zineb', role: 'cashier', pin: '864209' }); ok('wizard: a code already in use is refused', r.status === 409, r);
-  r = await boss('POST', '/api/team', { name: 'Zineb', role: 'cashier', pin: '12ab' }); ok('wizard: a bad code is refused', r.status === 400, r);
+  r = await boss('POST', '/api/team', { name: 'Zineb', role: 'cashier', pin: '12' }); ok('wizard: a too-short code is refused', r.status === 400, r);
   r = await boss('GET', '/api/team'); ok('refused attempts leave no half-created account', !r.json.users.some(u => u.name === 'Zineb'), r.json.users.map(u => u.name));
   const fatima = jar(); r = await fatima('POST', '/api/worker/pin-login', { pin: fatimaPin }); ok('the new worker signs in with the generated code', r.status === 200 && r.json.user.canReceiveStock === true, r);
   r = await anon('GET', '/api/update/idle'); ok('idle endpoint answers on the till itself', r.status === 200 && typeof r.json.idleSeconds === 'number', r);
@@ -164,9 +164,9 @@ const totp = (secretHex, step) => {
 
   // ---- short PIN login ----
   r = await boss('POST', '/api/team', { name: 'Nadia', username: 'nadia', role: 'cashier' }); const nadia = r.json.user.id;
-  r = await owner('POST', '/api/team/' + sara + '/pin', { pin: '123456' }); ok('trivial PIN 123456 refused', r.status === 400, r);
-  r = await owner('POST', '/api/team/' + sara + '/pin', { pin: '111111' }); ok('repeated-digit PIN refused', r.status === 400, r);
-  r = await owner('POST', '/api/team/' + sara + '/pin', { pin: '12ab' }); ok('PIN must be exactly 6 digits', r.status === 400, r);
+  r = await owner('POST', '/api/team/' + sara + '/pin', { pin: '123' }); ok('3-character code refused', r.status === 400, r);
+  r = await owner('POST', '/api/team/' + sara + '/pin', { pin: 'x'.repeat(33) }); ok('33-character code refused', r.status === 400, r);
+  r = await owner('POST', '/api/team/' + sara + '/pin', { pin: 'Caisse#2026' }); ok('letters and symbols are accepted as a code', r.status === 200, r);
   r = await owner('POST', '/api/team/' + sara + '/pin', { pin: '482913' }); ok('owner sets a PIN for a worker', r.status === 200, r);
   r = await owner('POST', '/api/team/' + nadia + '/pin', { pin: '482913' }); ok('same PIN refused for a second worker', r.status === 409, r);
   r = await boss('POST', '/api/team/' + nadia + '/pin', {}); ok('owner can generate a random PIN', r.status === 200 && /^\d{6}$/.test(r.json.pin) && r.json.generated === true, r);

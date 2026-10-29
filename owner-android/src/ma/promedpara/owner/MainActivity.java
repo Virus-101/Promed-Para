@@ -53,6 +53,7 @@ public final class MainActivity extends Activity {
         @Override public void onReceive(Context context, Intent intent) { if (intent != null && intent.getBooleanExtra("refresh", false)) loadDashboard(); }
     };
 
+    @Override protected void onResume() { super.onResume(); if (prefs != null) Updater.check(this, prefs.getString("server", ""), "PromedPara-Owner.apk"); }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);

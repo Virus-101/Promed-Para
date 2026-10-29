@@ -144,8 +144,7 @@ const weakPin = pin => /^(\d)\1{5}$/.test(pin) || '0123456789'.includes(pin) || 
 const pinTaken = (pin, exceptId) => db.prepare('SELECT id FROM users WHERE active=1 AND pin_hash IS NOT NULL AND id<>?').all(exceptId || '').length > 0 && db.prepare('SELECT id,pin_hash FROM users WHERE active=1 AND pin_hash IS NOT NULL AND id<>?').all(exceptId || '').some(row => passwordMatches(pin, row.pin_hash));
 const randomPin = exceptId => { for (let tries = 0; tries < 80; tries++) { const pin = String(randomBytes(4).readUInt32BE() % 900000 + 100000); if (!weakPin(pin) && !pinTaken(pin, exceptId)) return pin; } throw new HttpError(500, 'Impossible de générer un code, réessayez.'); };
 const checkNewPin = (pin, exceptId) => {
-  if (!/^\d{6}$/.test(pin)) throw new HttpError(400, 'Le code doit contenir exactement 6 chiffres.');
-  if (weakPin(pin)) throw new HttpError(400, 'Code trop simple (111111, 123456…). Choisissez-en un autre.');
+  if (typeof pin !== 'string' || pin.length < 4 || pin.length > 32) throw new HttpError(400, 'Le code doit contenir entre 4 et 32 caractères (chiffres, lettres ou symboles).');
   if (pinTaken(pin, exceptId)) throw new HttpError(409, 'Ce code est déjà utilisé par quelqu’un d’autre. Choisissez-en un autre.');
 };
 const RECOVERY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -247,7 +246,7 @@ const createNotification = (title, body, kind) => {
 const tableHas = table => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
 const firstRun = () => Number(db.prepare('SELECT COUNT(*) AS n FROM users').get().n) === 0;
 const isLoopback = address => address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
-const ownerUrls = () => ['127.0.0.1','localhost','::1'].includes(HOST) ? [] : Object.values(os.networkInterfaces()).flat().filter(item=>item?.family==='IPv4'&&!item.internal).map(item=>`http://${item.address}:${PORT}`);
+const ownerUrls = () => ['127.0.0.1','localhost','::1'].includes(HOST) ? [] : Object.values(os.networkInterfaces()).flat().filter(item=>item?.family==='IPv4'&&!item.internal&&!item.address.startsWith('169.254.')).map(item=>`http://${item.address}:${PORT}`);
 const attemptWindows = new Map();
 let pinFailures = [];
 let recoveryFailures = [];
@@ -394,9 +393,9 @@ async function api(request, response, url) {
     const now = Date.now();
     pinFailures = pinFailures.filter(at => now - at < 10 * 60_000);
     if (pinFailures.length >= 8) throw new HttpError(429, 'Trop d’essais de code PIN. Attendez 10 minutes ou utilisez le badge du téléphone.');
-    const body = await readBody(request), pin = String(body.pin || body.code || '').replace(/\D/g, '');
+    const body = await readBody(request), pin = String(body.pin || body.code || '').trim();
     let match = null;
-    if (/^\d{6}$/.test(pin)) {
+    if (pin.length >= 4 && pin.length <= 64) {
       for (const candidate of db.prepare("SELECT id,name,username,role,can_receive_stock,pin_hash FROM users WHERE active=1 AND pin_hash IS NOT NULL").all()) {
         if (passwordMatches(pin, candidate.pin_hash)) { match = candidate; break; }
       }

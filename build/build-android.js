@@ -53,4 +53,5 @@ function build(app) {
   console.log(app + ': built ' + apk + ' (' + Math.round(fs.statSync(apk).size / 1024) + ' KB, version ' + versionName + ' / ' + versionCode + ')');
 }
 
+fs.writeFileSync(path.join(root, 'public', 'android-version.json'), JSON.stringify({ versionCode: Number(versionCode), versionName }));
 for (const app of which === 'both' ? ['owner', 'worker'] : [which]) build(app);

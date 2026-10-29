@@ -9,3 +9,4 @@ RAPPORT-VERIFICATION.txt
 ERREURS-PromedPara-*.txt
 build/_patch-*.js
 build/android-work/
+build/

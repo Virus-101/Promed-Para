@@ -1,0 +1,19 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'ma.promedpara.worker'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'ma.promedpara.worker'
+        minSdk 26
+        targetSdk 35
+        versionCode 240
+        versionName '2.4.0'
+    }
+    sourceSets.main {
+        manifest.srcFile 'AndroidManifest.xml'
+        java.srcDirs = ['src']
+        res.srcDirs = ['res']
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    buildTypes { release { minifyEnabled false } }
+}

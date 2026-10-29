@@ -7,7 +7,7 @@ const dir = path.join(__dirname, 'node_modules', 'lucide-static');
 const names = ['layout-dashboard', 'package', 'truck', 'receipt', 'users', 'printer', 'store', 'globe', 'shopping-cart', 'package-check', 'package-plus', 'plus', 'log-out',
   'refresh-cw', 'search', 'search-x', 'smartphone', 'life-buoy', 'key-round', 'pencil', 'trash-2', 'x', 'check', 'circle-check', 'circle-x', 'upload', 'download', 'triangle-alert',
   'bell', 'scan-barcode', 'delete', 'external-link', 'arrow-right', 'arrow-down', 'trending-up', 'settings', 'baby', 'sun', 'pill', 'droplets', 'sparkles', 'stethoscope', 'leaf',
-  'message-circle', 'map-pin', 'shopping-bag', 'lock-keyhole', 'user-plus', 'shield-user', 'circle', 'file-check', 'monitor', 'activity', 'hash', 'heart-handshake', 'chevron-down'];
+  'message-circle', 'map-pin', 'shopping-bag', 'lock-keyhole', 'user-plus', 'shield-user', 'circle', 'file-check', 'monitor', 'activity', 'hash', 'heart-handshake', 'chevron-down', 'wifi'];
 const body = {};
 for (const n of names) {
   const svg = fs.readFileSync(path.join(dir, 'icons', n + '.svg'), 'utf8');

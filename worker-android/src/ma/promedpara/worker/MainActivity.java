@@ -60,6 +60,7 @@ public final class MainActivity extends Activity {
   private Runnable ticker;
   private String server="",deviceId="",workerName="",secretHex="";
 
+  @Override protected void onResume(){super.onResume();Updater.check(this,getPreferences(0).getString("server",""),"PromedPara-Worker.apk");}
   @Override public void onCreate(Bundle state){super.onCreate(state);getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);if(android.os.Build.VERSION.SDK_INT>=23)getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);loadSaved();if(secretHex.isEmpty())showPair();else showBadge();}
   @Override protected void onDestroy(){if(ticker!=null)handler.removeCallbacks(ticker);io.shutdownNow();super.onDestroy();}
   private int dp(float n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}

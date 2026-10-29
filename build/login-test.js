@@ -27,8 +27,8 @@ const jar = () => { let cookie = ''; return async (method, url, body) => {
   await start();
   const admin = jar(), anon = jar(), owner = jar();
   let r = await anon('GET', '/api/status'); ok('fresh install asks for setup', r.json.setupRequired === true && /^\d+\.\d+\.\d+$/.test(r.json.version), r.json);
-  r = await anon('POST', '/api/setup', { name: 'Hicham', pin: '123456' }); ok('setup refuses a trivial code', r.status === 400, r);
-  r = await anon('POST', '/api/setup', { name: 'Hicham', pin: '4829' }); ok('setup refuses a code that is not 6 digits', r.status === 400, r);
+  r = await anon('POST', '/api/setup', { name: 'Hicham', pin: '123' }); ok('setup refuses a too-short code', r.status === 400, r);
+  r = await anon('POST', '/api/setup', { name: 'Hicham', pin: 'x'.repeat(40) }); ok('setup refuses a code longer than 32 characters', r.status === 400, r);
   r = await admin('POST', '/api/setup', { name: 'Hicham', pin: '482913' });
   ok('administrator created with a 6-digit code and a recovery key', r.status === 201 && /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/.test(r.json.recoveryKey), r);
   let recoveryKey = r.json.recoveryKey;
@@ -43,7 +43,7 @@ const jar = () => { let cookie = ''; return async (method, url, body) => {
   const tempPin = r.json.tempPin, ownerId = r.json.user.id;
   r = await owner('POST', '/api/worker/pin-login', { pin: tempPin }); ok('owner signs in with the temporary code and is told to choose his own', r.status === 200 && r.json.user.mustSetPin === true, r);
   r = await owner('POST', '/api/change-pin', { newPin: '482913' }); ok('owner cannot take the admin\'s code', r.status === 409, r);
-  r = await owner('POST', '/api/change-pin', { newPin: '000000' }); ok('owner cannot choose a trivial code', r.status === 400, r);
+  r = await owner('POST', '/api/change-pin', { newPin: '12' }); ok('owner cannot choose a too-short code', r.status === 400, r);
   r = await owner('POST', '/api/change-pin', { newPin: '739150' }); ok('owner chooses his own code (no old code needed the first time)', r.status === 200, r);
   r = await owner('GET', '/api/me'); ok('owner no longer asked to change', r.json.user.mustSetPin === false, r.json);
   r = await anon('POST', '/api/worker/pin-login', { pin: tempPin }); ok('temporary code is dead', r.status === 401, r);
@@ -63,7 +63,7 @@ const jar = () => { let cookie = ''; return async (method, url, body) => {
 
   // ---- admin forgot the code
   r = await anon('POST', '/api/recover', { recoveryKey: 'AAAA-BBBB-CCCC-DDDD', newPin: '357951' }); ok('wrong recovery key refused', r.status === 401, r);
-  r = await anon('POST', '/api/recover', { recoveryKey: recoveryKey, newPin: '000000' }); ok('recovery refuses a trivial new code (and does not burn the key)', r.status === 400, r);
+  r = await anon('POST', '/api/recover', { recoveryKey: recoveryKey, newPin: '12' }); ok('recovery refuses a too-short new code (and does not burn the key)', r.status === 400, r);
   const back = jar(); r = await back('POST', '/api/recover', { recoveryKey: recoveryKey.toLowerCase().replace(/-/g, ' '), newPin: '357951' });
   ok('admin recovers access with the key (case/spacing tolerant)', r.status === 200 && r.json.user.isAdmin === true && r.json.recoveryKey && r.json.recoveryKey !== recoveryKey, r);
   const oldKey = recoveryKey; recoveryKey = r.json.recoveryKey;
