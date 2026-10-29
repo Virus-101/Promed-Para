@@ -46,7 +46,34 @@ public final class MonitorService extends Service {
     private void alert(String title,String body,long sequence){NotificationManager m=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);Intent open=new Intent(this,MainActivity.class);PendingIntent pending=PendingIntent.getActivity(this,(int)(sequence%1000000),open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL_ALERTS):new Notification.Builder(this);m.notify(2000+(int)(sequence%1000000),b.setSmallIcon(smallIcon()).setContentTitle(title).setContentText(body).setStyle(new Notification.BigTextStyle().bigText(body)).setAutoCancel(true).setContentIntent(pending).build());}
     private void broadcastRefresh(){Intent i=new Intent(MainActivity.ACTION_EVENT);i.setPackage(getPackageName());i.putExtra("refresh",true);sendBroadcast(i);}
 
+    /** Away from the shop Wi-Fi the till is reached through the relay, which cannot stream: ask for new alerts every few seconds. */
+    private void watchRelay(){
+        while(running&&prefs.getBoolean("monitoring",false)){
+            try{
+                pollRelay();
+                setStatus("Connecté par internet · alertes actives");
+            }catch(Exception error){if(running)setStatus((error.getMessage()==null?"Caisse injoignable":error.getMessage())+" · nouvelle tentative…");}
+            try{Thread.sleep(8000);}catch(InterruptedException ignored){Thread.currentThread().interrupt();break;}
+        }
+        if(!prefs.getBoolean("monitoring",false))stopSelf();
+    }
+
+    private void pollRelay()throws Exception{
+        boolean first=!prefs.contains("last_seq");
+        for(int page=0;page<10&&running;page++){
+            long after=prefs.getLong("last_seq",0);
+            MainActivity.Result result=MainActivity.requestAuthed(prefs,"/api/notifications?afterSeq="+after,"GET",null);
+            if(result.status==401||result.status==403){alert("Reconnectez-vous à PromedPara","Ce téléphone n’est plus associé à la caisse. Ouvrez l’application et associez-le à nouveau.",System.currentTimeMillis());prefs.edit().putBoolean("monitoring",false).apply();return;}
+            if(result.status<200||result.status>=300)throw new Exception("Caisse indisponible");
+            JSONArray list=new JSONObject(result.body).optJSONArray("notifications");if(list==null||list.length()==0){if(first)prefs.edit().putLong("last_seq",after).apply();break;}
+            for(int i=0;i<list.length();i++){JSONObject note=list.optJSONObject(i);if(first){if(note!=null)prefs.edit().putLong("last_seq",Math.max(prefs.getLong("last_seq",0),note.optLong("sequence",0))).apply();}else handleNotification(note);}
+            if(list.length()<500)break;
+        }
+        if(first&&!prefs.contains("last_seq"))prefs.edit().putLong("last_seq",0).apply();
+    }
+
     private void watch(){
+        if(Relay.isRelayAddress(prefs.getString("server",""))){watchRelay();return;}
         while(running&&prefs.getBoolean("monitoring",false)){
             HttpURLConnection connection=null;
             try{

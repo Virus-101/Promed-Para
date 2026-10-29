@@ -137,17 +137,17 @@ public final class MainActivity extends Activity {
 
     // ---- pairing (replaces the old username + password sign-in: owners have a 6-digit code on the till, not a password)
     private void showLogin() {
-        begin("Propriétaire", "Votre boutique,\nen direct.", "Associez ce téléphone au poste de caisse, sur le Wi‑Fi de la boutique.", true);
+        begin("Propriétaire", "Votre boutique,\nen direct.", "Associez ce téléphone à la caisse : au Wi‑Fi de la boutique ou partout par internet.", true);
         LinearLayout card=column(); pad(card,19,15,19,19); card.setBackground(shape(Color.WHITE,LINE,17));
         LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);
         card.addView(label("ADRESSE DU POSTE DE CAISSE"));
         serverField=field("http://192.168.1.10:4173",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI); serverField.setText(prefs.getString("server","")); card.addView(serverField,lp(-1,54));
-        TextView note=text("Affichée par la caisse, dans la fenêtre « Associer le téléphone ».",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
+        TextView note=text("Dans la fenêtre « Connecter mon téléphone » de la caisse : adresse locale (Wi‑Fi) ou adresse internet (https://…) pour fonctionner sans Wi‑Fi.",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
         card.addView(label("CODE D’ASSOCIATION (12 CARACTÈRES)")); codeField=field("XXXX XXXX XXXX",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); codeField.setLetterSpacing(.12f); groupCode(codeField); card.addView(codeField,lp(-1,56));
         Button pair=button("Associer ce téléphone",true,"smartphone",this::pair); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
         LinearLayout steps=column(); pad(steps,19,14,19,14); steps.setBackground(shape(Color.rgb(233,243,236),0,14)); LinearLayout.LayoutParams stp=lp(-1,-2); stp.setMargins(dp(16),0,dp(16),dp(12)); root.addView(steps,stp);
         TextView st=text("Comment obtenir le code ?",13,INK,true); steps.addView(st);
-        TextView how=text("Sur la caisse : Comptes équipe → votre fiche → « Associer le téléphone ». Le code est valable cinq minutes et ne sert qu’une fois. Ensuite le téléphone reste associé : plus besoin de code ni de mot de passe.",12,MUTED,false); how.setLineSpacing(dp(3),1f); LinearLayout.LayoutParams hw=lp(-1,-2); hw.topMargin=dp(5); steps.addView(how,hw);
+        TextView how=text("Sur la caisse : bouton « Connecter mon téléphone ». Le code est valable cinq minutes et ne sert qu’une fois. Ensuite le téléphone reste associé : plus besoin de code ni de mot de passe.",12,MUTED,false); how.setLineSpacing(dp(3),1f); LinearLayout.LayoutParams hw=lp(-1,-2); hw.topMargin=dp(5); steps.addView(how,hw);
         TextView foot=text("Données et base SQLite conservées sur le poste. Connexion locale uniquement.  ·  Version "+appVersion(),12,MUTED,false); foot.setGravity(Gravity.CENTER); LinearLayout.LayoutParams fp=lp(-1,-2); fp.setMargins(dp(28),dp(6),dp(28),dp(22)); root.addView(foot,fp);
     }
 
@@ -159,13 +159,14 @@ public final class MainActivity extends Activity {
         io.execute(() -> {
             try {
                 JSONObject body=new JSONObject().put("code",code).put("deviceName",Build.MANUFACTURER+" "+Build.MODEL);
-                Result result=request(base+"/api/owner/enroll","POST",null,body.toString());
+                Result result=Relay.isRelayAddress(base)?Relay.enroll(base,code,body.toString()):request(base+"/api/owner/enroll","POST",null,body.toString());
                 JSONObject json=new JSONObject(result.body);
                 if(result.status<200||result.status>=300) throw new Exception(json.optString("error","Association impossible."));
                 JSONObject account=json.getJSONObject("user");
                 if(!"owner".equals(account.optString("role"))) throw new Exception("Ce compte n’a pas les droits propriétaire.");
                 String token=json.optString("deviceToken","");
                 if(token.isEmpty()||result.cookie.isEmpty()) throw new Exception("Réponse inattendue du poste.");
+                if(Relay.isRelayAddress(base)){String relayKey=json.optString("key","");if(relayKey.length()!=64)throw new Exception("Réponse inattendue de la caisse.");prefs.edit().putString("relayKey",relayKey).apply();}else prefs.edit().remove("relayKey").apply();
                 prefs.edit().putString("cookie",result.cookie).putString("deviceToken",token).putString("ownerName",account.optString("name","Propriétaire")).putBoolean("monitoring",false).remove("last_seq").apply();
                 runOnUiThread(() -> { setBusy(false); hideKeyboard(); showDashboard(null); });
             } catch(Exception e) { runOnUiThread(() -> {setBusy(false);toast(message(e));}); }
@@ -192,11 +193,11 @@ public final class MainActivity extends Activity {
         addMetric(metrics,"PRODUITS",String.valueOf(data.optInt("productCount")),data.optJSONArray("lowStock")==null?"Catalogue":"Stock local",false,"package");
         LinearLayout secondMetrics=row(); LinearLayout.LayoutParams sm=lp(-1,-2); sm.topMargin=dp(10); area.addView(secondMetrics,sm);
         int lows=data.optJSONArray("lowStock")==null?0:data.optJSONArray("lowStock").length(); addMetric(secondMetrics,"STOCK BAS",String.valueOf(lows),"À réapprovisionner",false,"triangle_alert");
-        addMetric(secondMetrics,"RÉSEAU","Local","Même Wi‑Fi",true,"wifi");
+        if(Relay.isRelayAddress(prefs.getString("server","")))addMetric(secondMetrics,"RÉSEAU","Internet","Partout, sans Wi‑Fi",true,"wifi");else addMetric(secondMetrics,"RÉSEAU","Local","Même Wi‑Fi",true,"wifi");
         LinearLayout controls=column(); pad(controls,15,14,15,15); controls.setBackground(shape(Color.WHITE,LINE,15)); LinearLayout.LayoutParams cc=lp(-1,-2);cc.topMargin=dp(14);area.addView(controls,cc);
         TextView ch=text("ALERTES EN DIRECT",14,INK,true); withIcon(ch,"bell",18,GREEN_BRIGHT,8); controls.addView(ch);
         boolean running=prefs.getBoolean("monitoring",false);
-        TextView status=text(running?"Surveillance active · restez sur le Wi‑Fi de la boutique.":"Surveillance arrêtée · activez-la pour recevoir les alertes.",13,MUTED,false); LinearLayout.LayoutParams st=lp(-1,-2);st.topMargin=dp(4);controls.addView(status,st);
+        TextView status=text(running?"Surveillance active.":"Surveillance arrêtée · activez-la pour recevoir les alertes.",13,MUTED,false); LinearLayout.LayoutParams st=lp(-1,-2);st.topMargin=dp(4);controls.addView(status,st);
         Button monitor=button(running?"Arrêter la surveillance":"Démarrer la surveillance",!running,running?"bell_off":"bell",()->{if(prefs.getBoolean("monitoring",false))stopMonitoring();else requestNotificationPermissionAndStart();}); LinearLayout.LayoutParams mp=lp(-1,56);mp.topMargin=dp(12);controls.addView(monitor,mp);
         LinearLayout actions=row(); LinearLayout.LayoutParams ap=lp(-1,-2);ap.topMargin=dp(10);area.addView(actions,ap);
         Button refresh=button("Actualiser",false,"refresh_cw",this::loadDashboard); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,dp(52),1);rp.setMargins(0,0,dp(5),0);actions.addView(refresh,rp);
@@ -246,13 +247,13 @@ public final class MainActivity extends Activity {
     private void stopMonitoring() { prefs.edit().putBoolean("monitoring",false).apply();stopService(new Intent(this,MonitorService.class));toast("Surveillance arrêtée.");loadDashboard(); }
     private void logout() {
         prefs.edit().putBoolean("monitoring",false).apply(); stopService(new Intent(this,MonitorService.class));
-        io.execute(()->{String base=prefs.getString("server","");try{request(base+"/api/owner/device-logout","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).toString());}catch(Exception ignored){}try{request(base+"/api/logout","POST",prefs.getString("cookie",""),"{}");}catch(Exception ignored){}prefs.edit().remove("cookie").remove("deviceToken").remove("ownerName").apply();runOnUiThread(this::showLogin);});
+        io.execute(()->{String base=prefs.getString("server","");try{call(prefs,"/api/owner/device-logout","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).toString());}catch(Exception ignored){}try{call(prefs,"/api/logout","POST",prefs.getString("cookie",""),"{}");}catch(Exception ignored){}prefs.edit().remove("cookie").remove("deviceToken").remove("ownerName").remove("relayKey").apply();runOnUiThread(this::showLogin);});
     }
 
     private void setBusy(boolean busy) { if(codeField!=null)codeField.setEnabled(!busy); if(serverField!=null)serverField.setEnabled(!busy); }
     private void hideKeyboard(){try{((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(),0);}catch(Exception ignored){}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-    private String normalize(String input){String s=input.trim();if(s.isEmpty())return "";if(!s.contains("://"))s="http://"+s;if(!s.matches("(?i)^https?://[^/]+(?::\\d+)?/?$"))return "";return s.replaceAll("/+$","");}
+    private String normalize(String input){String s=input.trim();if(s.isEmpty())return "";if(Relay.isRelayAddress(s))return Relay.clean(s);if(!s.contains("://"))s="http://"+s;if(!s.matches("(?i)^https?://[^/]+(?::\\d+)?/?$"))return "";return s.replaceAll("/+$","");}
     private String message(Exception e){return e.getMessage()==null?"Connexion impossible.":e.getMessage();}
     static String money(long cents){return String.format(java.util.Locale.FRANCE,"%.2f MAD",cents/100.0);}
     static String num(double v){return v==(long)v?String.valueOf((long)v):String.format(java.util.Locale.FRANCE,"%.2f",v);}
@@ -262,17 +263,23 @@ public final class MainActivity extends Activity {
     // A request with the saved session; when the till says the session expired, the paired phone signs in again by itself.
     static Result requestAuthed(SharedPreferences prefs,String path,String method,String json)throws Exception {
         String base=prefs.getString("server","");
-        Result r=request(base+path,method,prefs.getString("cookie",""),json);
-        if(r.status==401&&refreshSession(prefs))r=request(base+path,method,prefs.getString("cookie",""),json);
+        Result r=call(prefs,path,method,prefs.getString("cookie",""),json);
+        if(r.status==401&&refreshSession(prefs))r=call(prefs,path,method,prefs.getString("cookie",""),json);
         return r;
     }
     static boolean refreshSession(SharedPreferences prefs) {
         String token=prefs.getString("deviceToken",""),base=prefs.getString("server","");
         if(token.isEmpty()||base.isEmpty())return false;
-        try{Result r=request(base+"/api/owner/device-login","POST",null,new JSONObject().put("deviceToken",token).toString());
+        try{Result r=call(prefs,"/api/owner/device-login","POST",null,new JSONObject().put("deviceToken",token).toString());
             if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){prefs.edit().putString("cookie",r.cookie).apply();return true;}
         }catch(Exception ignored){}
         return false;
+    }
+    /** One call to the till: through the internet relay when the saved address is a relay address, directly on the Wi-Fi otherwise. */
+    static Result call(SharedPreferences prefs,String path,String method,String cookie,String json)throws Exception {
+        String address=prefs.getString("server","");
+        if(Relay.isRelayAddress(address))return Relay.call(prefs,method,path,cookie,json);
+        return request(address.replaceAll("/+$","")+path,method,cookie,json);
     }
     static Result request(String address,String method,String cookie,String json)throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL(address).openConnection();c.setRequestMethod(method);c.setConnectTimeout(9000);c.setReadTimeout(15000);c.setRequestProperty("Accept","application/json");c.setRequestProperty("Connection","close");if(cookie!=null&&!cookie.isEmpty())c.setRequestProperty("Cookie",cookie);if(json!=null){c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json; charset=utf-8");try(OutputStream o=c.getOutputStream()){o.write(json.getBytes(StandardCharsets.UTF_8));}}

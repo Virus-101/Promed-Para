@@ -275,7 +275,7 @@ const shopClock = () => { const now = new Date(); return String(now.getHours()).
 const createSession = user => {
   const token = randomBytes(32).toString('base64url');
   sessions.set(token, { userId: user.id, expires: Date.now() + 12 * 60 * 60_000 });
-  if (user.role === 'cashier') createNotification('Employé connecté', `${user.name} · a ouvert la caisse à ${shopClock()}`, 'staff');
+  if (user.role === 'cashier') createNotification('Employé connecté', `${user.name} · a ouvert la caisse`, 'staff');
   return { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 60 * 60}` };
 };
 
@@ -479,7 +479,7 @@ async function api(request, response, url) {
   }
   if (route === '/api/logout' && request.method === 'POST') {
     const ending = sessions.get(cookieToken(request)), who = ending && db.prepare('SELECT name,role FROM users WHERE id=?').get(ending.userId);
-    if (who && who.role === 'cashier') createNotification('Employé déconnecté', `${who.name} · a fermé la caisse à ${shopClock()}`, 'staff');
+    if (who && who.role === 'cashier') createNotification('Employé déconnecté', `${who.name} · a fermé la caisse`, 'staff');
     sessions.delete(cookieToken(request));
     return send(response, 200, { ok: true }, { 'Set-Cookie': 'pp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
   }

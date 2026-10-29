@@ -22,3 +22,8 @@
 @keyframes wizspin{to{transform:rotate(360deg)}}
 .wizard-done{text-align:center;padding:12px 0 6px;color:#1b6b45}
 .wizard-done h3{justify-content:center}
+.wizard-modes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0 14px}
+.wizard-modes button{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px 14px;border-radius:12px;border:1.5px solid #d3ddd6;background:#fff;color:#173d2a;text-align:left;cursor:pointer;font:inherit}
+.wizard-modes button small{color:#5b6b61;font-size:12px}
+.wizard-modes button.on{border-color:#1b6b45;background:#eef6f1;box-shadow:0 0 0 2px rgba(27,107,69,.12)}
+.wizard-copy{margin:-6px 0 10px}

@@ -23,7 +23,9 @@ final class Updater {
     private static boolean asked;
     private Updater() {}
 
-    static void check(final Activity activity, final String base, final String apkName) {
+    static void check(final Activity activity, final String savedAddress, final String apkName) {
+        // away from the shop Wi-Fi the files come from the public GitHub release instead of the till
+        final String base = Relay.isRelayAddress(savedAddress) ? "https://github.com/Virus-101/Promed-Para/releases/latest/download" : savedAddress;
         if (asked || base == null || base.isEmpty()) return;
         new Thread(() -> {
             try {
