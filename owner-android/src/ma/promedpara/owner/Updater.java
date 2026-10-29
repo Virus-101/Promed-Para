@@ -23,6 +23,21 @@ final class Updater {
     private static boolean asked;
     private Updater() {}
 
+    /** The newest version name when it is newer than the installed one, else null (used by the background service). */
+    static String latest(android.content.Context context, String savedAddress) {
+        try {
+            String base = Relay.isRelayAddress(savedAddress) ? "https://github.com/Virus-101/Promed-Para/releases/latest/download" : savedAddress;
+            if (base == null || base.isEmpty()) return null;
+            HttpURLConnection c = (HttpURLConnection) new URL(base + "/android-version.json").openConnection();
+            c.setConnectTimeout(5000); c.setReadTimeout(5000);
+            if (c.getResponseCode() != 200) return null;
+            JSONObject info = new JSONObject(new String(readAll(c.getInputStream()), "UTF-8"));
+            android.content.pm.PackageInfo installed = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            long local = Build.VERSION.SDK_INT >= 28 ? installed.getLongVersionCode() : installed.versionCode;
+            return info.optLong("versionCode", 0) > local ? info.optString("versionName", "") : null;
+        } catch (Exception e) { return null; }
+    }
+
     static void check(final Activity activity, final String savedAddress, final String apkName) {
         // away from the shop Wi-Fi the files come from the public GitHub release instead of the till
         final String base = Relay.isRelayAddress(savedAddress) ? "https://github.com/Virus-101/Promed-Para/releases/latest/download" : savedAddress;

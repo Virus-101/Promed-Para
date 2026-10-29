@@ -33,7 +33,7 @@ public final class MonitorService extends Service {
         if(!prefs.getBoolean("monitoring",false)||prefs.getString("deviceToken","").isEmpty()){stopSelf();return START_NOT_STICKY;}
         Notification notification=monitorNotification("Connexion au poste local…");
         if(Build.VERSION.SDK_INT>=29)startForeground(FOREGROUND_ID,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);else startForeground(FOREGROUND_ID,notification);
-        if(!running){running=true;worker=new Thread(this::watch,"PromedPara-SSE");worker.start();}
+        if(!running){running=true;worker=new Thread(this::watch,"PromedPara-SSE");worker.start();new Thread(this::announceUpdates,"PromedPara-update").start();}
         return START_STICKY;
     }
     @Override public IBinder onBind(Intent intent){return null;}
@@ -47,6 +47,18 @@ public final class MonitorService extends Service {
     private void broadcastRefresh(){Intent i=new Intent(MainActivity.ACTION_EVENT);i.setPackage(getPackageName());i.putExtra("refresh",true);sendBroadcast(i);}
 
     /** Away from the shop Wi-Fi the till is reached through the relay, which cannot stream: ask for new alerts every few seconds. */
+    /** Every few hours: a newer app version makes a notification ("touch to install"), without the owner having to open the app. */
+    private void announceUpdates(){
+        try{Thread.sleep(20000);}catch(InterruptedException ignored){return;}
+        while(running&&prefs.getBoolean("monitoring",false)){
+            String name=Updater.latest(this,prefs.getString("server",""));
+            if(name!=null&&!name.isEmpty()&&!name.equals(prefs.getString("announcedUpdate",""))){
+                prefs.edit().putString("announcedUpdate",name).apply();
+                alert("Mise à jour de PromedPara disponible","Version "+name+" : touchez pour ouvrir l’application, puis « Installer ». Vos données et votre association sont conservées.",System.currentTimeMillis());
+            }
+            try{Thread.sleep(4*3600000L);}catch(InterruptedException ignored){return;}
+        }
+    }
     private void watchRelay(){
         while(running&&prefs.getBoolean("monitoring",false)){
             try{

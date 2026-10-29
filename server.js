@@ -200,6 +200,8 @@ const requireOwner = request => {
   return user;
 };
 const send = (response, status, data, headers = {}) => {
+  // whatever was changed is on disk BEFORE the till says "done": a power cut right after a sale cannot lose it
+  if (typeof db.flushNow === 'function') db.flushNow();
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers });
   response.end(JSON.stringify(data));
 };
@@ -619,7 +621,7 @@ async function api(request, response, url) {
     const actor = requireOwner(request), body = await readBody(request), action = String(body.action || '');
     if (!['check', 'apply', 'rollback'].includes(action)) throw new HttpError(400, 'Commande inconnue.');
     const version = clean(body.version, 20);
-    if (action === 'rollback' && !/^d{1,4}.d{1,4}.d{1,4}$/.test(version)) throw new HttpError(400, 'Version invalide.');
+    if (action === 'rollback' && !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(version)) throw new HttpError(400, 'Version invalide.');
     fs.writeFileSync(path.join(DATA_DIR, 'update-command.json'), JSON.stringify({ action, version, by: actor.name, at: isoNow() }));
     createNotification('Mise à jour demandée', `${actor.name} · ${action === 'check' ? 'recherche de mise à jour' : action === 'apply' ? 'installation maintenant' : 'retour à la version ' + version}`, 'security');
     return send(response, 202, { ok: true });
@@ -1123,6 +1125,26 @@ const server=http.createServer(async(request,response)=>{
 });
 server.listen(PORT,HOST,()=>{
   createNotification('Serveur', 'Le serveur PromedPara a démarré', 'info');
+  try {
+    // an update that was just installed: the owner is told, and the data and paired phones are untouched
+    const marker = path.join(DATA_DIR, 'last-version.txt'); let previous = '';
+    try { previous = fs.readFileSync(marker, 'utf8').trim(); } catch { /* first start */ }
+    if (previous && APP_VERSION && previous !== APP_VERSION) createNotification('Mise à jour installée', 'PromedPara est passé de la version ' + previous + ' à ' + APP_VERSION + '. Vos données, vos comptes et vos téléphones associés sont conservés.', 'info');
+    if (APP_VERSION) fs.writeFileSync(marker, APP_VERSION);
+    // an update that has been downloaded and waits for a quiet moment
+    const stagedMarker = path.join(DATA_DIR, 'last-staged.txt'); let announced = '';
+    try { announced = fs.readFileSync(stagedMarker, 'utf8').trim(); } catch { /* none yet */ }
+    const watchStaged = () => {
+      try {
+        const status = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'update-status.json'), 'utf8'));
+        if (status.staged && status.staged !== announced) {
+          announced = status.staged; fs.writeFileSync(stagedMarker, announced);
+          createNotification('Mise à jour prête', 'La version ' + announced + ' est téléchargée. Elle s’installe toute seule quand la caisse est au repos ou cette nuit. Rien à faire : vos données sont conservées.', 'info');
+        }
+      } catch { /* no status yet */ }
+    };
+    setTimeout(watchStaged, Number(process.env.PROMEDPARA_STAGED_FIRST_MS) || 60000); const timer = setInterval(watchStaged, 10 * 60000); if (timer.unref) timer.unref();
+  } catch (error) { console.error('update notices:', error.message); }
   try { remoteLink = require('./relay-client').start({ dataDir: DATA_DIR, port: PORT, defaultUrl: process.env.PROMEDPARA_RELAY_URL !== undefined ? process.env.PROMEDPARA_RELAY_URL : RELAY_URL, activeCodes: activePairingCodes }); } catch (error) { console.error('relay client:', error.message); }
   console.log(`PromedPara local service: http://localhost:${PORT}`);
   for(const entries of Object.values(os.networkInterfaces()))for(const item of entries||[])if(item.family==='IPv4'&&!item.internal)console.log(`Owner phone (same Wi-Fi): http://${item.address}:${PORT}`);

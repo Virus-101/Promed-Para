@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const FLUSH_DELAY_MS = 60;
+const FLUSH_DELAY_MS = 5;
 const KEEP_BACKUPS = 30;
 
 function dayStamp() {
@@ -90,15 +90,23 @@ class Database {
     if (this.timer) return;
     this.timer = setTimeout(() => { this.timer = null; this._flushSync(); }, FLUSH_DELAY_MS);
   }
+  /** Save now if something changed (called just before an answer is sent). */
+  flushNow() { if (this.timer) { clearTimeout(this.timer); this.timer = null; } this._flushSync(); }
   _flushSync() {
     if (!this.dirty || this.closed || this.inTransaction) return;
-    const data = Buffer.from(this.sqljs.export());
-    // export() resets connection pragmas in sql.js
-    this.sqljs.exec('PRAGMA foreign_keys = ON');
-    const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, data);
-    fs.renameSync(tmp, this.file);
-    this.dirty = false;
+    try {
+      const data = Buffer.from(this.sqljs.export());
+      // export() resets connection pragmas in sql.js
+      this.sqljs.exec('PRAGMA foreign_keys = ON');
+      const tmp = this.file + '.tmp';
+      fs.writeFileSync(tmp, data);
+      fs.renameSync(tmp, this.file);
+      this.dirty = false;
+    } catch (error) {
+      // Windows can lock the file for a moment (antivirus, indexer): keep the change in memory and try again very soon, never crash
+      console.error('Save postponed:', error.message);
+      if (!this.timer && !this.closed) { this.timer = setTimeout(() => { this.timer = null; this._flushSync(); }, 400); }
+    }
   }
   close() {
     if (this.closed) return;

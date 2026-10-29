@@ -245,9 +245,8 @@ public final class MainActivity extends Activity {
         begin("Propriétaire","Application verrouillée","Entrez votre code personnel (celui de la caisse) pour voir votre boutique.",false);
         LinearLayout card=column(); pad(card,19,15,19,19); card.setBackground(shape(Color.WHITE,LINE,17));
         LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);
-        card.addView(label("VOTRE CODE PERSONNEL"));
         if(CodeVault.has(prefs)){ TextView auto=text("Déverrouillage automatique avec le code mémorisé…",13,MUTED,false); auto.setPadding(0,0,0,dp(8)); card.addView(auto); }
-        LinearLayout.LayoutParams ap=lp(-1,54); ap.bottomMargin=dp(10); card.addView(accountField(),ap);
+        card.addView(label("COMPTE")); LinearLayout.LayoutParams ap=lp(-1,54); ap.bottomMargin=dp(6); card.addView(accountField(),ap); card.addView(label("VOTRE CODE PERSONNEL"));
         pinField=pinInput("Code personnel"); markPassword(pinField); pinField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
         pinField.setOnEditorActionListener((v,actionId,event)->{unlock();return true;});
         card.addView(pinField,lp(-1,56)); card.addView(pinKeyboardSwitch(pinField)); rememberBox=rememberCheckbox(); card.addView(rememberBox);

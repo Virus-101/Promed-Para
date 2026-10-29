@@ -19,7 +19,15 @@ function rimraf(p) {
     const full = path.join(p, name);
     if (fs.lstatSync(full).isDirectory()) rimraf(full); else fs.unlinkSync(full);
   }
-  fs.rmdirSync(p);
+  // another program may keep the folder itself open (a shell, an indexer): the files are gone, so rebuilding inside it is fine
+  for (let attempt = 0; ; attempt++) {
+    try { fs.rmdirSync(p); return; } catch (error) {
+      const busy = /EBUSY|ENOTEMPTY|EPERM/.test(String(error.code));
+      if (!busy) throw error;
+      if (attempt >= 4) return;
+      const until = Date.now() + 400; while (Date.now() < until) { /* short wait */ }
+    }
+  }
 }
 function copyDir(from, to, skip) {
   fs.mkdirSync(to, { recursive: true });
