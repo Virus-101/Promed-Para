@@ -34,6 +34,9 @@ const jar = () => { let cookie = ''; return async (method, url, body) => {
   let recoveryKey = r.json.recoveryKey;
   r = await admin('GET', '/api/me'); ok('setup signs the admin in; admin flags correct', r.json.user.isAdmin && r.json.user.hasPin && !r.json.user.mustSetPin, r.json);
   r = await anon('POST', '/api/setup', { name: 'Intrus', pin: '735192' }); ok('setup cannot be repeated', r.status === 409, r);
+  r = await admin('POST', '/api/change-pin', { recoveryKey: 'AAAA-BBBB-CCCC-DDDD', newPin: 'Zz-Brand-New-9' }); ok('change-code with a wrong recovery key is refused', r.status === 401, r);
+  r = await admin('POST', '/api/change-pin', { recoveryKey: recoveryKey.toLowerCase().replace(/-/g, ' '), newPin: 'A-Long-Personal-Code-2026' }); ok('administrator can change the code with the recovery key (any spacing)', r.status === 200, r);
+  r = await admin('POST', '/api/change-pin', { currentPin: 'A-Long-Personal-Code-2026', newPin: '482913' }); ok('a code longer than 6 characters works as the current code', r.status === 200, r);
   r = await anon('POST', '/api/login', { username: 'hicham', password: '482913' }); ok('login with the name (any case) and personal code', r.status === 200 && r.json.user.isAdmin, r);
   r = await anon('POST', '/api/login', { username: 'Hicham', password: '482914' }); ok('wrong code through the name form is refused', r.status === 401, r);
 

@@ -778,11 +778,17 @@ async function api(request, response, url) {
     return send(response, 200, { ok: true });
   }
   if (route === '/api/change-pin' && request.method === 'POST') {
-    rateLimit(request, 'change-pin', 8);
+    rateLimit(request, 'change-pin', 12);
     const me = requireUser(request), b = await readBody(request), next = String(b.newPin || '').trim();
     if (me.role !== 'owner') throw new HttpError(403, 'Demandez au propriétaire de changer votre code.');
     const row = db.prepare('SELECT pin_hash,must_change_password FROM users WHERE id=?').get(me.id);
-    if (row.pin_hash && !row.must_change_password && !passwordMatches(String(b.currentPin || ''), row.pin_hash)) throw new HttpError(401, 'Le code actuel est incorrect.');
+    const recoveryKey = String(b.recoveryKey || '').trim();
+    if (recoveryKey) {
+      // an administrator who forgot the current code proves who they are with the recovery key shown at setup (on the till itself only)
+      if (!isLocal(request) || !isAdmin(me.id)) throw new HttpError(403, 'La clé de récupération s’utilise sur la caisse, par l’administrateur.');
+      const holder = db.prepare('SELECT recovery_hash FROM users WHERE id=?').get(me.id);
+      if (!holder || !holder.recovery_hash || !passwordMatches(normRecovery(recoveryKey), holder.recovery_hash)) throw new HttpError(401, 'Clé de récupération incorrecte.');
+    } else if (row.pin_hash && !row.must_change_password && !passwordMatches(String(b.currentPin || ''), row.pin_hash)) throw new HttpError(401, 'Le code actuel est incorrect.');
     checkNewPin(next, me.id);
     db.prepare('UPDATE users SET pin_hash=?,must_change_password=0 WHERE id=?').run(passwordHash(next), me.id);
     createNotification('Code personnel modifié', me.name, 'security');
