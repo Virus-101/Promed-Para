@@ -13,6 +13,7 @@ const LEGACY_EXPORT_PATH = String.raw`F:\para\Articles_15-10-2026 22-35-00-touts
 // Keep the live database on the workstation even when the app itself runs from USB.
 const DATA_DIR = path.resolve(process.env.PROMEDPARA_DATA_DIR || path.join(ROOT, 'data'));
 const execFileAsync = promisify(execFile);
+const RELAY_URL = 'https://promedpara-relay.onrender.com';   // the owner-phone relay (relay/ folder); can be changed in data/relay.json
 const APP_VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'version.json'), 'utf8')).version || ''; } catch { return ''; } })();
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new Database(path.join(DATA_DIR, 'promedpara.sqlite'));
@@ -246,6 +247,11 @@ const createNotification = (title, body, kind) => {
 const tableHas = table => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
 const firstRun = () => Number(db.prepare('SELECT COUNT(*) AS n FROM users').get().n) === 0;
 const isLoopback = address => address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
+// requests that arrive through the internet relay come from 127.0.0.1 too, but carry this header: they are never the till itself
+const isLocal = request => isLoopback(request.socket.remoteAddress) && !request.headers['x-promed-relay'];
+const livePairingCodes = new Map();
+const activePairingCodes = () => { const now = Date.now(); for (const [code, until] of livePairingCodes) if (until < now) livePairingCodes.delete(code); return Array.from(livePairingCodes.keys()); };
+let remoteLink = { enabled: false, connected: false, address: '' };
 const ownerUrls = () => ['127.0.0.1','localhost','::1'].includes(HOST) ? [] : Object.values(os.networkInterfaces()).flat().filter(item=>item?.family==='IPv4'&&!item.internal&&!item.address.startsWith('169.254.')).map(item=>`http://${item.address}:${PORT}`);
 const attemptWindows = new Map();
 let pinFailures = [];
@@ -341,7 +347,7 @@ async function api(request, response, url) {
   }
   if (route === '/api/setup' && request.method === 'POST') {
     if (!firstRun()) throw new HttpError(409, 'Le propriétaire est déjà configuré.');
-    if (!isLoopback(request.socket.remoteAddress)) throw new HttpError(403, 'Créez le premier propriétaire directement sur le poste de caisse.');
+    if (!isLocal(request)) throw new HttpError(403, 'Créez le premier propriétaire directement sur le poste de caisse.');
     const body = await readBody(request);
     const name = clean(body.name, 90), username = clean(body.username, 50).toLowerCase(), password = String(body.password || '');
     if (body.pin !== undefined && !body.password) {
@@ -367,7 +373,7 @@ async function api(request, response, url) {
     // the person may type a username or their full name, and either an old password or their personal code (code: on the till only)
     const user = db.prepare('SELECT * FROM users WHERE active=1 AND (username=? OR lower(name)=?)').get(username, username);
     let allowed = Boolean(user) && passwordMatches(secret, user.password_hash);
-    if (!allowed && user && user.pin_hash && isLoopback(request.socket.remoteAddress)) allowed = passwordMatches(secret, user.pin_hash);
+    if (!allowed && user && user.pin_hash && isLocal(request)) allowed = passwordMatches(secret, user.pin_hash);
     if (!allowed) throw new HttpError(401, 'Nom ou code incorrect.');
     const token = randomBytes(32).toString('base64url'); sessions.set(token, { userId: user.id, expires: Date.now() + 30 * 86400_000 });
     return send(response, 200, { user: userSafe(user) }, { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 86400}` });
@@ -394,7 +400,7 @@ async function api(request, response, url) {
   }
   if (route === '/api/worker/pin-login' && request.method === 'POST') {
     // Short personal code, typed on the till's own touch keypad. Refused from phones/other PCs on purpose.
-    if (!isLoopback(request.socket.remoteAddress)) throw new HttpError(403, 'Le code PIN fonctionne uniquement sur la caisse. Utilisez le badge du téléphone.');
+    if (!isLocal(request)) throw new HttpError(403, 'Le code PIN fonctionne uniquement sur la caisse. Utilisez le badge du téléphone.');
     rateLimit(request, 'worker-pin', 10);
     const now = Date.now();
     pinFailures = pinFailures.filter(at => now - at < 10 * 60_000);
@@ -479,7 +485,7 @@ async function api(request, response, url) {
   }
   if (route === '/api/update/idle' && request.method === 'GET') {
     // Used by the till's own app to know when nobody has touched the till for a while. Loopback only.
-    if (!isLoopback(request.socket.remoteAddress)) throw new HttpError(403, 'Réservé à la caisse.');
+    if (!isLocal(request)) throw new HttpError(403, 'Réservé à la caisse.');
     return send(response, 200, { idleSeconds: Math.round((Date.now() - lastActivityAt) / 1000) });
   }
   if (route === '/api/update/status' && request.method === 'GET') {
@@ -665,6 +671,10 @@ async function api(request, response, url) {
     for (const product of sale.lowStockCrossings) createNotification('Alerte stock bas', `${product.name} · reste ${product.quantity} ${product.unit} · seuil ${product.threshold}`, 'low-stock');
     return send(response, 201, { sale });
   }
+  if (route === '/api/remote/status' && request.method === 'GET') {
+    requireOwner(request);
+    return send(response, 200, { enabled: remoteLink.enabled, connected: remoteLink.connected, address: remoteLink.address, lastOk: remoteLink.lastOk || 0 });
+  }
   if (route === '/api/overview' && request.method === 'GET') {
     requireOwner(request);
     // Sales are stored in UTC, but "today" and the 7-day chart follow the shop's own calendar day (Africa/Casablanca).
@@ -742,7 +752,7 @@ async function api(request, response, url) {
   }
   if (route === '/api/recover' && request.method === 'POST') {
     // Administrator forgot the code: recovery key (shown once at setup) + a new code. Only on the till itself.
-    if (!isLoopback(request.socket.remoteAddress)) throw new HttpError(403, 'La récupération se fait sur la caisse elle-même.');
+    if (!isLocal(request)) throw new HttpError(403, 'La récupération se fait sur la caisse elle-même.');
     const now = Date.now();
     recoveryFailures = recoveryFailures.filter(at => now - at < 3600_000);
     if (recoveryFailures.length >= 5) throw new HttpError(429, 'Trop d’essais. Réessayez dans une heure, ou utilisez RESET-CODE-ADMIN.bat sur la caisse.');
@@ -780,8 +790,9 @@ async function api(request, response, url) {
     if (user.id !== actor.id && !isAdmin(actor.id)) throw new HttpError(403, 'Seul le propriétaire concerné ou l’administrateur peut associer ce téléphone.');
     const code = randomBytes(8).toString('hex').slice(0, 12).toUpperCase(), createdAt = isoNow(), expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
     db.prepare('DELETE FROM owner_pairings WHERE user_id=? OR expires_at<=?').run(userId, createdAt);
+    livePairingCodes.set(code, Date.now() + 5 * 60_000);
     db.prepare('INSERT INTO owner_pairings(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)').run(sha256(code), userId, expiresAt, createdAt);
-    return send(response, 201, { code, expiresAt, kind: 'owner', serverUrls: ownerUrls(), workerUrls: ownerUrls().map(url => `${url}/owner-app`), workerApkUrls: ownerUrls().map(url => `${url}/PromedPara-Owner.apk`) });
+    return send(response, 201, { code, expiresAt, kind: 'owner', remote: remoteLink.enabled ? { address: remoteLink.address, connected: remoteLink.connected } : null, serverUrls: ownerUrls(), workerUrls: ownerUrls().map(url => `${url}/owner-app`), workerApkUrls: ownerUrls().map(url => `${url}/PromedPara-Owner.apk`) });
   }
   if (route === '/api/owner/enroll' && request.method === 'POST') {
     rateLimit(request, 'owner-enroll', 12);
@@ -958,6 +969,7 @@ const server=http.createServer(async(request,response)=>{
 });
 server.listen(PORT,HOST,()=>{
   createNotification('Serveur', 'Le serveur PromedPara a démarré', 'info');
+  try { remoteLink = require('./relay-client').start({ dataDir: DATA_DIR, port: PORT, defaultUrl: process.env.PROMEDPARA_RELAY_URL !== undefined ? process.env.PROMEDPARA_RELAY_URL : RELAY_URL, activeCodes: activePairingCodes }); } catch (error) { console.error('relay client:', error.message); }
   console.log(`PromedPara local service: http://localhost:${PORT}`);
   for(const entries of Object.values(os.networkInterfaces()))for(const item of entries||[])if(item.family==='IPv4'&&!item.internal)console.log(`Owner phone (same Wi-Fi): http://${item.address}:${PORT}`);
 });for (const signal of ['SIGINT','SIGTERM']) process.on(signal,()=>{server.close();db.close();process.exit(0)});

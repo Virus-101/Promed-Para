@@ -1,0 +1,9 @@
+{
+  "name": "promedpara-relay",
+  "version": "1.0.0",
+  "description": "Dumb encrypted mailbox that lets the owner phone reach the shop till from anywhere. It never sees readable data.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "license": "ISC"
+}
