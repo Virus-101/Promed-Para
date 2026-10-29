@@ -21,7 +21,8 @@ final class SystemBars {
         final View content = activity.findViewById(android.R.id.content);
         decor.setOnApplyWindowInsetsListener((v, insets) -> {
             int top = insets.getSystemWindowInsetTop();
-            content.setPadding(0, top, 0, 0);
+            int bottom = insets.getSystemWindowInsetBottom();   // includes the keyboard, so the form scrolls above it
+            content.setPadding(0, top, 0, bottom);
             content.setBackground(new InsetDrawable(new ColorDrawable(bodyColor), 0, top, 0, 0));
             return v.onApplyWindowInsets(insets);
         });
