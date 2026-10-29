@@ -151,6 +151,15 @@ public final class MainActivity extends Activity {
         });
         return t;
     }
+    /** Tells Android's autofill (Samsung Pass, Google, any password manager) that this is an account name and a password. */
+    private EditText accountField() {
+        EditText e = field("Compte", InputType.TYPE_CLASS_TEXT); e.setText(prefs.getString("ownerName", "Propriétaire")); e.setFocusable(false); e.setClickable(false); e.setTextColor(MUTED);
+        if (Build.VERSION.SDK_INT >= 26) { e.setAutofillHints(View.AUTOFILL_HINT_USERNAME); e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES); }
+        return e;
+    }
+    private void markPassword(EditText e) { if (Build.VERSION.SDK_INT >= 26) { e.setAutofillHints(View.AUTOFILL_HINT_PASSWORD); e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES); } }
+    /** After a successful sign-in the password manager is told the form was submitted, so it can offer to save the code. */
+    private void commitAutofill() { try { if (Build.VERSION.SDK_INT >= 26) { android.view.autofill.AutofillManager manager = getSystemService(android.view.autofill.AutofillManager.class); if (manager != null) manager.commit(); } } catch (Exception ignored) { } }
     private android.widget.CheckBox rememberCheckbox() {
         android.widget.CheckBox b = new android.widget.CheckBox(this); b.setText("Mémoriser mon code sur ce téléphone (ne plus le demander)"); b.setTextSize(13); b.setTextColor(INK); b.setPadding(dp(4), dp(12), 0, dp(2)); return b;
     }
@@ -173,7 +182,7 @@ public final class MainActivity extends Activity {
         serverField=field("http://192.168.1.10:4173",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI); serverField.setText(Relay.isRelayAddress(prefs.getString("server",""))?"":prefs.getString("server","")); card.addView(serverField,lp(-1,54));
         TextView note=text("Dans la fenêtre « Connecter mon téléphone » de la caisse : adresse locale (Wi‑Fi) ou adresse internet (https://…) pour fonctionner sans Wi‑Fi.",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
         card.addView(label("CODE D’ASSOCIATION (12 CARACTÈRES)")); codeField=field("XXXX XXXX XXXX",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); codeField.setLetterSpacing(.12f); groupCode(codeField); card.addView(codeField,lp(-1,56));
-        card.addView(label("VOTRE CODE PERSONNEL (CELUI DE LA CAISSE)")); pinField=pinInput("Code personnel"); card.addView(pinField,lp(-1,56)); card.addView(pinKeyboardSwitch(pinField)); rememberBox=rememberCheckbox(); card.addView(rememberBox);
+        card.addView(label("VOTRE CODE PERSONNEL (CELUI DE LA CAISSE)")); pinField=pinInput("Code personnel"); markPassword(pinField); card.addView(pinField,lp(-1,56)); card.addView(pinKeyboardSwitch(pinField)); rememberBox=rememberCheckbox(); card.addView(rememberBox);
         Button pair=button("Associer ce téléphone",true,"smartphone",this::pair); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
         Button ring=button("Demander un code à l’administrateur",false,"bell",this::askAdminForCode); LinearLayout.LayoutParams rp=lp(-1,54); rp.topMargin=dp(10); card.addView(ring,rp);
         LinearLayout steps=column(); pad(steps,19,14,19,14); steps.setBackground(shape(Color.rgb(233,243,236),0,14)); LinearLayout.LayoutParams stp=lp(-1,-2); stp.setMargins(dp(16),0,dp(16),dp(12)); root.addView(steps,stp);
@@ -225,7 +234,7 @@ public final class MainActivity extends Activity {
                 if(Relay.isRelayAddress(base)){String relayKey=json.optString("key","");if(relayKey.length()!=64)throw new Exception("Réponse inattendue de la caisse.");prefs.edit().putString("relayKey",relayKey).apply();}else prefs.edit().remove("relayKey").apply();
                 prefs.edit().putString("cookie",result.cookie).putString("deviceToken",token).putString("ownerName",account.optString("name","Propriétaire")).putBoolean("monitoring",false).remove("last_seq").apply();
                 if(remember)CodeVault.save(prefs,pin); else CodeVault.forget(prefs);
-                runOnUiThread(() -> { unlocked=true; setBusy(false); hideKeyboard(); showDashboard(null); });
+                runOnUiThread(() -> { commitAutofill(); unlocked=true; setBusy(false); hideKeyboard(); showDashboard(null); });
             } catch(Exception e) { runOnUiThread(() -> {setBusy(false);toast(message(e));}); }
         });
     }
@@ -238,15 +247,31 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);
         card.addView(label("VOTRE CODE PERSONNEL"));
         if(CodeVault.has(prefs)){ TextView auto=text("Déverrouillage automatique avec le code mémorisé…",13,MUTED,false); auto.setPadding(0,0,0,dp(8)); card.addView(auto); }
-        pinField=pinInput("Code personnel"); pinField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        LinearLayout.LayoutParams ap=lp(-1,54); ap.bottomMargin=dp(10); card.addView(accountField(),ap);
+        pinField=pinInput("Code personnel"); markPassword(pinField); pinField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
         pinField.setOnEditorActionListener((v,actionId,event)->{unlock();return true;});
         card.addView(pinField,lp(-1,56)); card.addView(pinKeyboardSwitch(pinField)); rememberBox=rememberCheckbox(); card.addView(rememberBox);
         Button go=button("Déverrouiller",true,"lock_keyhole",this::unlock); LinearLayout.LayoutParams gp=lp(-1,58); gp.topMargin=dp(19); card.addView(go,gp);
         Button forgot=button("J’ai oublié mon code : réassocier ce téléphone",false,"smartphone",()->new android.app.AlertDialog.Builder(this).setTitle("Réassocier ce téléphone ?").setMessage("Le téléphone sera dissocié de la caisse. Il faudra un nouveau code d’association (bouton « Connecter mon téléphone » sur la caisse) et votre code personnel. Si vous avez oublié votre code, utilisez « Mon code » sur la caisse.").setNegativeButton("Annuler",null).setPositiveButton("Réassocier",(d,w)->logout()).show());
         LinearLayout.LayoutParams fp=lp(-1,54); fp.topMargin=dp(10); card.addView(forgot,fp);
-        if(CodeVault.has(prefs)) autoUnlock();
+        if(CodeVault.has(prefs)) biometricThenAutoUnlock();
         pinField.requestFocus();
         new android.os.Handler().postDelayed(()->{try{((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(pinField,0);}catch(Exception ignored){}},300);
+    }
+    /** A remembered code is only used after the person proves they are there: fingerprint, face or the phone's screen lock (Android 11+). */
+    private void biometricThenAutoUnlock() {
+        if (Build.VERSION.SDK_INT < 30) { autoUnlock(); return; }
+        try {
+            final android.hardware.biometrics.BiometricManager manager = getSystemService(android.hardware.biometrics.BiometricManager.class);
+            final int allowed = android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG | android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL;
+            if (manager == null || manager.canAuthenticate(allowed) != android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS) { autoUnlock(); return; }   // no screen lock on the phone: nothing to ask
+            android.hardware.biometrics.BiometricPrompt prompt = new android.hardware.biometrics.BiometricPrompt.Builder(this)
+                .setTitle("PromedPara").setSubtitle("Empreinte, visage ou code du téléphone pour ouvrir votre boutique").setAllowedAuthenticators(allowed).build();
+            prompt.authenticate(new android.os.CancellationSignal(), getMainExecutor(), new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                @Override public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult result) { autoUnlock(); }
+                @Override public void onAuthenticationError(int code, CharSequence message) { /* cancelled or refused: the typed lock screen stays */ }
+            });
+        } catch (Exception e) { autoUnlock(); }
     }
     /** With a remembered code the app opens by itself: the saved code is sent to the till exactly as if it had been typed. */
     private void autoUnlock() {
@@ -270,7 +295,7 @@ public final class MainActivity extends Activity {
         io.execute(() -> {
             try {
                 Result r=call(prefs,"/api/owner/unlock","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).put("pin",pin).toString());
-                if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){ prefs.edit().putString("cookie",r.cookie).apply(); if(remember)CodeVault.save(prefs,pin); runOnUiThread(() -> { unlocked=true; hideKeyboard(); showDashboard(null); }); return; }
+                if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){ prefs.edit().putString("cookie",r.cookie).apply(); if(remember)CodeVault.save(prefs,pin); runOnUiThread(() -> { commitAutofill(); unlocked=true; hideKeyboard(); showDashboard(null); }); return; }
                 final String msg=new JSONObject(r.body).optString("error","Code incorrect.");
                 if(r.status==401&&msg.contains("non reconnu")){ prefs.edit().remove("cookie").remove("alertCookie").remove("deviceToken").remove("relayKey").putBoolean("monitoring",false).apply(); runOnUiThread(() -> { toast(msg); showLogin(); }); return; }
                 runOnUiThread(() -> { pinField.setEnabled(true); pinField.setText(""); pinField.requestFocus(); toast(msg); });

@@ -122,6 +122,11 @@ function createWindow() {
   win.loadURL(LOADING);
 }
 
+const remember = require('./remember');
+ipcMain.handle('remember:info', () => remember.info());
+ipcMain.handle('remember:save', (event, name, code) => remember.save(name, code));
+ipcMain.handle('remember:use', () => remember.use());
+ipcMain.handle('remember:forget', () => remember.forget());
 ipcMain.handle('print-receipt', event => new Promise(resolve => {
   // Silent print on the default printer (the Xprinter). If it fails the page falls back to the normal print dialog.
   event.sender.print({ silent: true, printBackground: true }, (ok, reason) => { log('impression ticket: ' + ok + ' ' + (reason || '')); resolve({ ok, reason }); });
@@ -131,6 +136,20 @@ app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(
 app.on('window-all-closed', () => app.quit());
 
 app.whenReady().then(async () => {
+  if (process.env.PROMEDPARA_SELFTEST === 'remember') {
+    // build check: the code survives a save/read round trip, is not readable on disk, and can be forgotten
+    let out = {};
+    try {
+      const os = require('os');
+      app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'pp-remember-')));
+      out = { available: remember.info().available, saved: remember.save('Test Owner', 'Mon-Code-482913').ok };
+      const back = remember.use(); out.roundTrip = back.ok && back.code === 'Mon-Code-482913' && back.name === 'Test Owner';
+      out.onDisk = !fs.readFileSync(path.join(app.getPath('userData'), 'remembered-login.json'), 'utf8').includes('482913');
+      remember.forget(); out.forgotten = !remember.use().ok;
+    } catch (error) { out.error = String(error && error.message || error); }
+    if (process.env.PROMEDPARA_SELFTEST_OUT) fs.writeFileSync(process.env.PROMEDPARA_SELFTEST_OUT, JSON.stringify(out));
+    app.exit(0); return;
+  }
   log('--- demarrage Electron ' + process.versions.electron + ' racine=' + ROOT);
   createWindow();
   const ok = await ensureServer();

@@ -1,0 +1,47 @@
+PromedPara - Promed Parapharmacie, Errachidia
+===========================================
+
+Bonjour,
+
+Voici les deux applications de la caisse PromedPara. Les liens ci-dessous marchent depuis n'importe quel appareil.
+
+Page avec les deux téléchargements :
+https://github.com/Virus-101/Promed-Para/releases/tag/telechargements
+
+
+1) TÉLÉPHONE DU PROPRIÉTAIRE (Android)
+--------------------------------------
+Téléchargement direct :
+https://github.com/Virus-101/Promed-Para/releases/download/telechargements/PromedPara-Owner.apk
+
+- Ouvrez le lien dans Chrome sur le téléphone, puis touchez « Télécharger ».
+- Ouvrez le fichier. Si Android dit « installation bloquée », touchez « Paramètres » et autorisez
+  l'installation depuis Chrome pour cette fois, puis revenez en arrière et touchez « Installer ».
+- Ouvrez « PromedPara Owner » et saisissez :
+    1. l'adresse de la caisse (que l'administrateur vous envoie),
+    2. le code d'association à 12 caractères (valable 5 minutes, il ne sert qu'une fois),
+    3. VOTRE code personnel (celui de votre compte sur la caisse).
+- Cochez « Mémoriser mon code sur ce téléphone » si vous ne voulez plus le retaper.
+- Pas de code d'association ? Touchez « Demander un code à l'administrateur » : il reçoit
+  une notification et vous envoie le code.
+- Ensuite l'application se met à jour toute seule. Vous recevez les ventes, les alertes de stock et
+  l'arrivée des employés, au magasin comme à l'extérieur.
+
+
+2) PC DE LA CAISSE (Windows 7, 10 ou 11)
+----------------------------------------
+Téléchargement direct (environ 92 Mo) :
+https://github.com/Virus-101/Promed-Para/releases/download/telechargements/PromedPara-Caisse-Windows.zip
+
+- Téléchargez le fichier, faites un clic droit puis « Extraire tout... ».
+- Dans le dossier extrait, double-cliquez sur « 1-VERIFIER-LE-SYSTEME.bat » (contrôle du PC),
+  puis sur « 2-INSTALLER.bat » (clic droit > Exécuter en tant qu'administrateur si demandé).
+- Windows peut afficher « Windows a protégé votre ordinateur » (l'application n'est pas signée) :
+  cliquez « Informations complémentaires » puis « Exécuter quand même ».
+- À la première ouverture, créez le compte administrateur : nom + code personnel
+  (4 à 32 caractères) et NOTEZ la clé de récupération affichée une seule fois.
+- La caisse s'ouvre ensuite toute seule à l'allumage du PC et se met à jour toute seule.
+
+
+Contrôle d'intégrité (facultatif) : les empreintes SHA-256 des deux fichiers sont dans le fichier
+SHA256.txt de la même page de téléchargement.

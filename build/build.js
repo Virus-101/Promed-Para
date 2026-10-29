@@ -84,7 +84,7 @@ fs.renameSync(path.join(OUT, 'electron', 'electron.exe'), path.join(OUT, 'electr
 require('child_process').execFileSync(process.execPath, [path.join(__dirname, 'set-exe-icon.js'), path.join(OUT, 'electron', 'PromedPara.exe'), path.join(__dirname, 'assets', 'icon.ico'), VERSION], { stdio: 'inherit' });
 const shellDir = path.join(OUT, 'electron', 'resources', 'app');
 fs.mkdirSync(shellDir, { recursive: true });
-for (const f of ['main.js', 'preload.js', 'package.json', 'updater.js']) fs.copyFileSync(path.join(__dirname, 'electron', f), path.join(shellDir, f));
+for (const f of ['main.js', 'preload.js', 'package.json', 'updater.js', 'remember.js']) fs.copyFileSync(path.join(__dirname, 'electron', f), path.join(shellDir, f));
 for (const f of ['updater-core.js', 'apply-update.js']) fs.copyFileSync(path.join(__dirname, f), path.join(shellDir, f));
 fs.copyFileSync(path.join(__dirname, 'assets', 'icon.png'), path.join(shellDir, 'icon.png'));
 copyDir(path.join(__dirname, 'assets'), path.join(OUT, 'assets'));
