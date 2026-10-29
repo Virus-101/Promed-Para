@@ -711,7 +711,7 @@ async function api(request, response, url) {
   }
   if (route === '/api/remote/status' && request.method === 'GET') {
     requireOwner(request);
-    return send(response, 200, { enabled: remoteLink.enabled, connected: remoteLink.connected, address: remoteLink.address, lastOk: remoteLink.lastOk || 0 });
+    return send(response, 200, { enabled: remoteLink.enabled, connected: remoteLink.connected, address: remoteLink.address, lastOk: remoteLink.lastOk || 0, lastAttempt: remoteLink.lastAttempt || null });
   }
   if (route === '/api/overview' && request.method === 'GET') {
     requireOwner(request);

@@ -36,7 +36,7 @@ function start(options) {
   if (options.defaultUrl && !cfg.url) { cfg.url = options.defaultUrl; fs.writeFileSync(file, JSON.stringify(cfg, null, 2)); }
   if (!/^[a-f0-9]{64}$/.test(cfg.wkey || '')) { cfg.wkey = crypto.randomBytes(32).toString('hex'); fs.writeFileSync(file, JSON.stringify(cfg, null, 2)); }
   const key = Buffer.from(cfg.key, 'hex'), workerKey = Buffer.from(cfg.wkey, 'hex');
-  const state = { enabled: cfg.enabled !== false && Boolean(cfg.url), connected: false, lastOk: 0, url: cfg.url || '', tillId: cfg.tillId, workerKey: cfg.wkey, address: '', stop: function () {} };
+  const state = { enabled: cfg.enabled !== false && Boolean(cfg.url), connected: false, lastOk: 0, lastAttempt: null, url: cfg.url || '', tillId: cfg.tillId, workerKey: cfg.wkey, address: '', stop: function () {} };
   const seen = new Map(), secret = crypto.randomBytes(16).toString('hex');
   let stopped = false;
   if (!state.enabled) return state;
@@ -90,7 +90,10 @@ function start(options) {
       }
     }
     let answer;
-    if (!plain) answer = JSON.stringify({ e: 'auth' });
+    if (!plain) {
+      answer = JSON.stringify({ e: 'auth' });
+      if (message && message.m === 'e') state.lastAttempt = { at: Date.now(), ok: false, reason: 'code d’association incorrect ou expiré' };
+    }
     else {
       let request = null;
       try { request = JSON.parse(plain); } catch (error) { request = null; }
@@ -111,6 +114,7 @@ function start(options) {
           try { const data = JSON.parse(reply.b); data.key = enrollingWorker ? cfg.wkey : cfg.key; data.tillId = cfg.tillId; reply.b = JSON.stringify(data); } catch (error) { /* keep as is */ }
         }
       }
+      if (message.m === 'e') { let why = ''; try { why = JSON.parse(reply.b).error || ''; } catch (error) { why = ''; } state.lastAttempt = { at: Date.now(), ok: reply.s >= 200 && reply.s < 300, reason: why || (reply.s >= 200 && reply.s < 300 ? '' : 'refusé (' + reply.s + ')') }; }
       answer = JSON.stringify({ d: seal(usedKey, JSON.stringify({ n: request ? request.n : '', s: reply.s, c: reply.c, b: reply.b })) });
     }
     try { await call('POST', '/t/' + cfg.tillId + '/res/' + item.id, answer, 15000); } catch (error) { /* the phone will retry */ }
