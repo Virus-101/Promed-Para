@@ -96,7 +96,7 @@ try { const guide = path.join(OUT, 'GUIDE.html'); const logoB64 = fs.readFileSyn
 copyDir(path.join(SRC, 'owner-android'), path.join(OUT, 'android-source', 'owner-android'), n => n === 'build');
 copyDir(path.join(SRC, 'worker-android'), path.join(OUT, 'android-source', 'worker-android'), n => n === 'build');
 fs.mkdirSync(path.join(OUT, 'android'), { recursive: true });
-for (const apk of ['PromedPara-Owner.apk', 'PromedPara-Worker.apk']) fs.copyFileSync(path.join(SRC, 'public', apk), path.join(OUT, 'android', apk));
+for (const apk of ['PromedPara-Owner.apk']) fs.copyFileSync(path.join(SRC, 'public', apk), path.join(OUT, 'android', apk));
 
 // 6. Windows-friendly text files: CRLF line endings; UTF-8 BOM on .ps1 (PowerShell 2.0 reads BOM-less files as ANSI and garbles accents).
 function walk(dir, out) {

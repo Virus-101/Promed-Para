@@ -9,7 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cp = require('child_process');
 
-const which = process.argv[2] || 'both', versionName = process.argv[3] || '2.4.0', versionCode = process.argv[4] || '240';
+const which = process.argv[2] || 'owner', versionName = process.argv[3] || '2.4.0', versionCode = process.argv[4] || '240';
 const sdk = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME || path.join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk');
 const buildTools = path.join(sdk, 'build-tools', '35.0.1'), androidJar = path.join(sdk, 'platforms', 'android-35', 'android.jar');
 const javaHome = process.env.JAVA_HOME || '';
