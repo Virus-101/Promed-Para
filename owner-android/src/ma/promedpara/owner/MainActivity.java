@@ -224,7 +224,7 @@ public final class MainActivity extends Activity {
     }
 
     private void showLoginAdvanced() {
-        begin("Propriétaire", "Votre boutique,\nen direct.", "Associez ce téléphone à la caisse : au Wi‑Fi de la boutique ou partout par internet.", true);
+        begin("Propriétaire", "Votre boutique,\nen direct.", "Connexion avancée : à utiliser seulement si l’adresse de la caisse vous a été donnée. Sinon, revenez et tapez votre nom et votre code.", true);
         LinearLayout card=column(); pad(card,19,15,19,19); card.setBackground(shape(Color.WHITE,LINE,17));
         LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);
         card.addView(label("ADRESSE DU POSTE DE CAISSE"));
@@ -234,6 +234,7 @@ public final class MainActivity extends Activity {
         card.addView(label("VOTRE CODE PERSONNEL (CELUI DE LA CAISSE)")); pinField=pinInput("Code personnel"); markPassword(pinField); card.addView(pinField,lp(-1,56)); card.addView(pinKeyboardSwitch(pinField)); rememberBox=rememberCheckbox(); card.addView(rememberBox);
         Button pair=button("Associer ce téléphone",true,"smartphone",this::pair); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
         Button ring=button("Demander un code à l’administrateur",false,"bell",this::askAdminForCode); LinearLayout.LayoutParams rp=lp(-1,54); rp.topMargin=dp(10); card.addView(ring,rp);
+        Button back=button("Retour : nom et code personnel",false,null,this::showLogin); LinearLayout.LayoutParams bk=lp(-1,50); bk.topMargin=dp(8); card.addView(back,bk);
         LinearLayout steps=column(); pad(steps,19,14,19,14); steps.setBackground(shape(Color.rgb(233,243,236),0,14)); LinearLayout.LayoutParams stp=lp(-1,-2); stp.setMargins(dp(16),0,dp(16),dp(12)); root.addView(steps,stp);
         TextView st=text("Comment obtenir le code ?",13,INK,true); steps.addView(st);
         TextView how=text("Sur la caisse : bouton « Connecter mon téléphone ». Le code est valable cinq minutes et ne sert qu’une fois. Ensuite le téléphone reste associé : plus besoin de code ni de mot de passe.",12,MUTED,false); how.setLineSpacing(dp(3),1f); LinearLayout.LayoutParams hw=lp(-1,-2); hw.topMargin=dp(5); steps.addView(how,hw);
