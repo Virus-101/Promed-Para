@@ -48,6 +48,7 @@ public final class MainActivity extends Activity {
     private SharedPreferences prefs;
     private JSONArray currentSuppliers;
     private EditText serverField, codeField, pinField;
+    private android.widget.CheckBox rememberBox;
     private boolean unlocked; private long pausedAt;
     private LinearLayout root;
     private boolean receiverRegistered;
@@ -133,6 +134,26 @@ public final class MainActivity extends Activity {
 
   /** Shows a pairing code as XXXX XXXX XXXX while it is typed or pasted, so nobody has to type the spaces. */
   static void groupCode(final android.widget.EditText e){e.addTextChangedListener(new android.text.TextWatcher(){boolean busy;public void beforeTextChanged(CharSequence s,int a,int b,int c){}public void onTextChanged(CharSequence s,int a,int b,int c){}public void afterTextChanged(android.text.Editable ed){if(busy)return;busy=true;String raw=ed.toString().replaceAll("[^A-Fa-f0-9]","").toUpperCase(java.util.Locale.ROOT);if(raw.length()>12)raw=raw.substring(0,12);StringBuilder sb=new StringBuilder();for(int i=0;i<raw.length();i++){if(i>0&&i%4==0)sb.append(' ');sb.append(raw.charAt(i));}String out=sb.toString();if(!out.equals(ed.toString()))ed.replace(0,ed.length(),out);busy=false;}});}
+    private static final int PIN_NUMBERS = InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD, PIN_TEXT = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
+    /** The personal code is usually digits: open the number pad, with a switch to the full keyboard for codes that contain letters. */
+    private EditText pinInput(String hint) {
+        EditText e = field(hint, prefs.getBoolean("pinKeyboardText", false) ? PIN_TEXT : PIN_NUMBERS);
+        e.setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());
+        return e;
+    }
+    private TextView pinKeyboardSwitch(final EditText target) {
+        final boolean[] text = { prefs.getBoolean("pinKeyboardText", false) };
+        final TextView t = text(text[0] ? "Revenir au clavier chiffres" : "Mon code contient des lettres : clavier complet", 13, GREEN_BRIGHT, true); t.setPadding(0, dp(10), 0, dp(2));
+        t.setOnClickListener(v -> {
+            text[0] = !text[0]; prefs.edit().putBoolean("pinKeyboardText", text[0]).apply();
+            target.setInputType(text[0] ? PIN_TEXT : PIN_NUMBERS); target.setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance()); target.setSelection(target.getText().length());
+            t.setText(text[0] ? "Revenir au clavier chiffres" : "Mon code contient des lettres : clavier complet");
+        });
+        return t;
+    }
+    private android.widget.CheckBox rememberCheckbox() {
+        android.widget.CheckBox b = new android.widget.CheckBox(this); b.setText("Mémoriser mon code sur ce téléphone (ne plus le demander)"); b.setTextSize(13); b.setTextColor(INK); b.setPadding(dp(4), dp(12), 0, dp(2)); return b;
+    }
     private EditText field(String hint, int inputType) {
         EditText e = new EditText(this); e.setSingleLine(true); e.setTextSize(16); e.setHint(hint); e.setInputType(inputType); e.setTextColor(INK); e.setHintTextColor(MUTED); e.setBackground(shape(Color.WHITE,LINE,11)); pad(e,13,2,13,2); return e;
     }
@@ -152,7 +173,7 @@ public final class MainActivity extends Activity {
         serverField=field("http://192.168.1.10:4173",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI); serverField.setText(Relay.isRelayAddress(prefs.getString("server",""))?"":prefs.getString("server","")); card.addView(serverField,lp(-1,54));
         TextView note=text("Dans la fenêtre « Connecter mon téléphone » de la caisse : adresse locale (Wi‑Fi) ou adresse internet (https://…) pour fonctionner sans Wi‑Fi.",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
         card.addView(label("CODE D’ASSOCIATION (12 CARACTÈRES)")); codeField=field("XXXX XXXX XXXX",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); codeField.setLetterSpacing(.12f); groupCode(codeField); card.addView(codeField,lp(-1,56));
-        card.addView(label("VOTRE CODE PERSONNEL (CELUI DE LA CAISSE)")); pinField=field("Code personnel",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD); card.addView(pinField,lp(-1,56));
+        card.addView(label("VOTRE CODE PERSONNEL (CELUI DE LA CAISSE)")); pinField=pinInput("Code personnel"); card.addView(pinField,lp(-1,56)); card.addView(pinKeyboardSwitch(pinField)); rememberBox=rememberCheckbox(); card.addView(rememberBox);
         Button pair=button("Associer ce téléphone",true,"smartphone",this::pair); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
         Button ring=button("Demander un code à l’administrateur",false,"bell",this::askAdminForCode); LinearLayout.LayoutParams rp=lp(-1,54); rp.topMargin=dp(10); card.addView(ring,rp);
         LinearLayout steps=column(); pad(steps,19,14,19,14); steps.setBackground(shape(Color.rgb(233,243,236),0,14)); LinearLayout.LayoutParams stp=lp(-1,-2); stp.setMargins(dp(16),0,dp(16),dp(12)); root.addView(steps,stp);
@@ -186,6 +207,7 @@ public final class MainActivity extends Activity {
     private void pair() {
         String base=normalize(serverField.getText().toString()), code=codeField.getText().toString().toUpperCase(Locale.ROOT).replaceAll("[^A-F0-9]","");
         final String pin=pinField==null?"":pinField.getText().toString().trim();
+        final boolean remember=rememberBox!=null&&rememberBox.isChecked();
         if(base.isEmpty() || code.length()!=12){toast("Entrez l’adresse du poste et le code d’association à 12 caractères.");return;}
         if(pin.isEmpty()){toast("Entrez aussi votre code personnel (celui que vous tapez sur la caisse).");return;}
         prefs.edit().putString("server",base).apply();
@@ -202,6 +224,7 @@ public final class MainActivity extends Activity {
                 if(token.isEmpty()||result.cookie.isEmpty()) throw new Exception("Réponse inattendue du poste.");
                 if(Relay.isRelayAddress(base)){String relayKey=json.optString("key","");if(relayKey.length()!=64)throw new Exception("Réponse inattendue de la caisse.");prefs.edit().putString("relayKey",relayKey).apply();}else prefs.edit().remove("relayKey").apply();
                 prefs.edit().putString("cookie",result.cookie).putString("deviceToken",token).putString("ownerName",account.optString("name","Propriétaire")).putBoolean("monitoring",false).remove("last_seq").apply();
+                if(remember)CodeVault.save(prefs,pin); else CodeVault.forget(prefs);
                 runOnUiThread(() -> { unlocked=true; setBusy(false); hideKeyboard(); showDashboard(null); });
             } catch(Exception e) { runOnUiThread(() -> {setBusy(false);toast(message(e));}); }
         });
@@ -214,23 +237,40 @@ public final class MainActivity extends Activity {
         LinearLayout card=column(); pad(card,19,15,19,19); card.setBackground(shape(Color.WHITE,LINE,17));
         LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);
         card.addView(label("VOTRE CODE PERSONNEL"));
-        pinField=field("Code personnel",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD); pinField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        if(CodeVault.has(prefs)){ TextView auto=text("Déverrouillage automatique avec le code mémorisé…",13,MUTED,false); auto.setPadding(0,0,0,dp(8)); card.addView(auto); }
+        pinField=pinInput("Code personnel"); pinField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
         pinField.setOnEditorActionListener((v,actionId,event)->{unlock();return true;});
-        card.addView(pinField,lp(-1,56));
+        card.addView(pinField,lp(-1,56)); card.addView(pinKeyboardSwitch(pinField)); rememberBox=rememberCheckbox(); card.addView(rememberBox);
         Button go=button("Déverrouiller",true,"lock_keyhole",this::unlock); LinearLayout.LayoutParams gp=lp(-1,58); gp.topMargin=dp(19); card.addView(go,gp);
         Button forgot=button("J’ai oublié mon code : réassocier ce téléphone",false,"smartphone",()->new android.app.AlertDialog.Builder(this).setTitle("Réassocier ce téléphone ?").setMessage("Le téléphone sera dissocié de la caisse. Il faudra un nouveau code d’association (bouton « Connecter mon téléphone » sur la caisse) et votre code personnel. Si vous avez oublié votre code, utilisez « Mon code » sur la caisse.").setNegativeButton("Annuler",null).setPositiveButton("Réassocier",(d,w)->logout()).show());
         LinearLayout.LayoutParams fp=lp(-1,54); fp.topMargin=dp(10); card.addView(forgot,fp);
+        if(CodeVault.has(prefs)) autoUnlock();
         pinField.requestFocus();
         new android.os.Handler().postDelayed(()->{try{((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(pinField,0);}catch(Exception ignored){}},300);
     }
+    /** With a remembered code the app opens by itself: the saved code is sent to the till exactly as if it had been typed. */
+    private void autoUnlock() {
+        io.execute(() -> {
+            String code=CodeVault.read(prefs);
+            if(code==null){ CodeVault.forget(prefs); return; }
+            try {
+                Result r=call(prefs,"/api/owner/unlock","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).put("pin",code).toString());
+                if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){ prefs.edit().putString("cookie",r.cookie).apply(); runOnUiThread(() -> { unlocked=true; hideKeyboard(); showDashboard(null); }); return; }
+                String msg=new JSONObject(r.body).optString("error","");
+                if(r.status==401&&msg.contains("non reconnu")){ prefs.edit().remove("cookie").remove("alertCookie").remove("deviceToken").remove("relayKey").putBoolean("monitoring",false).apply(); CodeVault.forget(prefs); runOnUiThread(() -> { toast(msg); showLogin(); }); return; }
+                if(r.status==401){ CodeVault.forget(prefs); runOnUiThread(() -> toast("Votre code a changé sur la caisse : entrez-le à nouveau.")); }
+            } catch(Exception offline) { runOnUiThread(() -> { unlocked=true; showDashboard(null); }); }   // caisse injoignable : le tableau de bord propose « Réessayer »
+        });
+    }
     private void unlock() {
         final String pin=pinField==null?"":pinField.getText().toString().trim();
+        final boolean remember=rememberBox!=null&&rememberBox.isChecked();
         if(pin.isEmpty()){toast("Entrez votre code personnel.");return;}
         pinField.setEnabled(false);
         io.execute(() -> {
             try {
                 Result r=call(prefs,"/api/owner/unlock","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).put("pin",pin).toString());
-                if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){ prefs.edit().putString("cookie",r.cookie).apply(); runOnUiThread(() -> { unlocked=true; hideKeyboard(); showDashboard(null); }); return; }
+                if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){ prefs.edit().putString("cookie",r.cookie).apply(); if(remember)CodeVault.save(prefs,pin); runOnUiThread(() -> { unlocked=true; hideKeyboard(); showDashboard(null); }); return; }
                 final String msg=new JSONObject(r.body).optString("error","Code incorrect.");
                 if(r.status==401&&msg.contains("non reconnu")){ prefs.edit().remove("cookie").remove("alertCookie").remove("deviceToken").remove("relayKey").putBoolean("monitoring",false).apply(); runOnUiThread(() -> { toast(msg); showLogin(); }); return; }
                 runOnUiThread(() -> { pinField.setEnabled(true); pinField.setText(""); pinField.requestFocus(); toast(msg); });
@@ -270,6 +310,7 @@ public final class MainActivity extends Activity {
         addSection(area,"STOCK À SURVEILLER","triangle_alert",lowStockText(data.optJSONArray("lowStock")));
         addSection(area,"FOURNISSEURS","truck",suppliersText(currentSuppliers));
         addSection(area,"ACTIVITÉ RÉCENTE","receipt",notificationsText(data.optJSONArray("notifications")));
+        if(CodeVault.has(prefs)){ TextView forgetCode=text("Code mémorisé sur ce téléphone · toucher pour l’oublier",12,GREEN_BRIGHT,true); forgetCode.setGravity(Gravity.CENTER); forgetCode.setPadding(0,dp(14),0,dp(2)); forgetCode.setOnClickListener(v->{CodeVault.forget(prefs);toast("Code oublié : il sera demandé à la prochaine ouverture.");v.setVisibility(View.GONE);}); area.addView(forgetCode); }
         TextView footer=text("La base de données reste sur le poste. L’application communique avec lui sur le réseau local.  ·  Version "+appVersion(),12,MUTED,false); footer.setGravity(Gravity.CENTER); LinearLayout.LayoutParams ft=lp(-1,-2);ft.topMargin=dp(18);area.addView(footer,ft);
     }
 
@@ -311,7 +352,7 @@ public final class MainActivity extends Activity {
     }
     private void stopMonitoring() { prefs.edit().putBoolean("monitoring",false).apply();stopService(new Intent(this,MonitorService.class));toast("Surveillance arrêtée.");loadDashboard(); }
     private void logout() {
-        unlocked=false;
+        unlocked=false; CodeVault.forget(prefs);
         prefs.edit().putBoolean("monitoring",false).apply(); stopService(new Intent(this,MonitorService.class));
         io.execute(()->{String base=prefs.getString("server","");try{call(prefs,"/api/owner/device-logout","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).toString());}catch(Exception ignored){}try{call(prefs,"/api/logout","POST",prefs.getString("cookie",""),"{}");}catch(Exception ignored){}prefs.edit().remove("cookie").remove("alertCookie").remove("deviceToken").remove("ownerName").remove("relayKey").apply();runOnUiThread(this::showLogin);});
     }
