@@ -38,7 +38,8 @@ function copyDir(from, to, skip) {
   }
 }
 
-rimraf(OUT);
+// the shop data (data) and logs live inside the kit folder: a rebuild must never delete them
+if (fs.existsSync(OUT)) { for (const name of fs.readdirSync(OUT)) if (name !== 'data' && name !== 'logs') { const full = path.join(OUT, name); if (fs.lstatSync(full).isDirectory()) rimraf(full); else fs.unlinkSync(full); } }
 fs.mkdirSync(path.join(APP, 'vendor'), { recursive: true });
 
 // 1. Server: transpile modern syntax down to Node 12 and swap better-sqlite3 for the sql.js shim.

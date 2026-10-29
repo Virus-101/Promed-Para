@@ -99,7 +99,7 @@ final class Relay {
         if (status == 429) throw new Exception("Trop d’essais, patientez une minute.");
         if (status != 200) throw new Exception("Liaison internet indisponible (" + status + "). Réessayez dans un instant.");
         org.json.JSONArray tills = new JSONObject(new String(buffer.toByteArray(), StandardCharsets.UTF_8)).getJSONArray("tills");
-        if (tills.length() == 0) throw new Exception("Aucune caisse en ligne n’a de compte propriétaire à ce nom. Vérifiez le nom, et que la caisse est allumée avec internet.");
+        if (tills.length() == 0) throw new Exception("Compte propriétaire introuvable. Les employés se connectent sur la caisse, pas ici. Vérifiez aussi que la caisse est en ligne.");
         Exception last = null;
         for (int i = 0; i < tills.length(); i++) {
             JSONObject till = tills.getJSONObject(i);
@@ -134,7 +134,7 @@ final class Relay {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         InputStream in = c.getInputStream(); byte[] chunk = new byte[4096]; int n; while ((n = in.read(chunk)) != -1) buffer.write(chunk, 0, n); in.close(); c.disconnect();
         org.json.JSONArray tills = new JSONObject(new String(buffer.toByteArray(), StandardCharsets.UTF_8)).getJSONArray("tills");
-        if (tills.length() == 0) throw new Exception("Aucune caisse en ligne n’a de compte propriétaire à ce nom.");
+        if (tills.length() == 0) throw new Exception("Compte propriétaire introuvable (les employés se connectent sur la caisse).");
         return ring(DEFAULT_BASE + "/" + tills.getJSONObject(0).getString("id"), name);
     }
 
