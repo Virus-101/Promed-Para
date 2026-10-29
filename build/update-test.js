@@ -40,7 +40,7 @@ function makeKit(version, tweak) {
   copyDir(path.join(KIT, 'app'), path.join(ROOT, 'app')); copyDir(path.join(KIT, 'runtime'), path.join(ROOT, 'runtime')); copyDir(path.join(KIT, 'tools'), path.join(ROOT, 'tools'));
   copyDir(path.join(KIT, 'electron', 'resources', 'app'), path.join(ROOT, 'electron', 'resources', 'app'));
   core.mkdirp(path.join(ROOT, 'config')); core.mkdirp(DATA);
-  fs.writeFileSync(path.join(ROOT, 'config', 'update.json'), JSON.stringify({ repo: '', baseUrl: 'http://127.0.0.1:' + HTTP_PORT + '/', publicKey, checkEveryHours: 6, nightWindow: '03:00-05:00', idleMinutes: 0.1 }));
+  fs.writeFileSync(path.join(ROOT, 'config', 'update.json'), JSON.stringify({ repo: '', baseUrl: 'http://127.0.0.1:' + HTTP_PORT + '/', publicKey, checkEveryHours: 6, nightWindow: (h => String(h).padStart(2, '0') + ':00-' + String((h + 1) % 24).padStart(2, '0') + ':00')((new Date().getHours() + 12) % 24), idleMinutes: 0.1 }));
   process.env.PROMEDPARA_APPLY_TEST = '1';
   const installed = readJson(path.join(ROOT, 'app', 'version.json')).version;
 
@@ -130,7 +130,7 @@ function makeKit(version, tweak) {
   publish(auto); await updater.check('test'); ok('next release is staged', st().staged === '9.1.3', st());
   const api = (m, u, b, cookie) => fetch('http://127.0.0.1:' + PORT + u, { method: m, headers: Object.assign({ 'Content-Type': 'application/json' }, cookie ? { Cookie: cookie } : {}), body: b ? JSON.stringify(b) : undefined });
   const su = await api('POST', '/api/setup', { name: 'Test Owner', username: 'owner', password: 'correct-horse-9' }); const cookie = su.headers.get('set-cookie').split(';')[0];
-  await api('GET', '/api/me', null, cookie);   // activity right now
+  await api('GET', '/api/products', null, cookie);   // a real action by a signed-in user = the till is in use right now
   await updater.tick(); await sleep(2500);
   ok('NOT installed while the till was just used', (await status()).version === installed && st().staged === '9.1.3', await status());
   await sleep(7000);

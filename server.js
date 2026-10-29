@@ -4,6 +4,7 @@ const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const autostart = require('./autostart');
 const { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } = require('crypto');
 const Database = require('better-sqlite3');
 
@@ -381,6 +382,14 @@ const chosenLegacyPath = id => {
 async function api(request, response, url) {
   const route = url.pathname;
   if (route === '/api/status' && request.method === 'GET') return send(response, 200, { setupRequired: firstRun(), business: 'PromedPara', version: APP_VERSION, location: 'Errachidia, Maroc', ownerUrls:ownerUrls() });
+  if (route === '/api/autostart/status' && request.method === 'GET') { requireOwner(request); return send(response, 200, await autostart.status(process.env.PROMEDPARA_EXE)); }
+  if (route === '/api/autostart/enable' && request.method === 'POST') {
+    const actor = requireOwner(request);
+    if (!isLocal(request)) throw new HttpError(403, 'À activer depuis la caisse elle-même.');
+    await autostart.enable(process.env.PROMEDPARA_EXE);
+    createNotification('Démarrage automatique activé', 'La caisse s’ouvrira toute seule à l’allumage du PC · par ' + actor.name, 'info');
+    return send(response, 200, await autostart.status(process.env.PROMEDPARA_EXE));
+  }
   if (route === '/api/legacy-export/check' && request.method === 'POST') {
     requireOwner(request);
     const body = await readBody(request);

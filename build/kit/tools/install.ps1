@@ -101,7 +101,7 @@ foreach ($d in $desktops) {
 }
 [void](New-Shortcut $dest 'PromedPara (mode secours Chrome)' $secours ('"' + (Join-Path $dest 'LANCER-CAISSE.vbs') + '"') $null 'A utiliser seulement si l''application ne s''ouvre pas')
 if ($made -gt 0) { Say 'OK : raccourcis "PromedPara Caisse" et "Test lecteur code-barres" sur le bureau' 'Green' } else { Say ('ATTENTION : aucun raccourci cree. Lancez directement : ' + $mainTarget) 'Yellow' }
-if (Ask 'Demarrer PromedPara automatiquement a chaque allumage du PC (recommande apres une coupure de courant) ?') {
+if ($true) {   # toujours : la caisse doit se rouvrir toute seule apres une coupure de courant
     if (New-Shortcut (Get-CommonStartup) 'PromedPara Caisse' $mainTarget $mainArgs $mainIcon 'Ouvrir la caisse PromedPara') { Say 'OK : demarrage automatique active' 'Green' }
     else { Say 'ATTENTION : demarrage automatique non active.' 'Yellow' }
 }

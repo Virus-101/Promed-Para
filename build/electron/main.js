@@ -73,7 +73,7 @@ function ensureServer() {
       fs.mkdirSync(LOG_DIR, { recursive: true });
       const out = fs.openSync(path.join(LOG_DIR, 'serveur.log'), 'a');
       const err = fs.openSync(path.join(LOG_DIR, 'serveur-erreurs.log'), 'a');
-      const env = Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA_DIR, PORT: String(PORT), HOST: '0.0.0.0' });
+      const env = Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA_DIR, PORT: String(PORT), HOST: '0.0.0.0', PROMEDPARA_EXE: process.execPath });
       delete env.ELECTRON_RUN_AS_NODE;
       const child = spawn(node, ['main.js'], { cwd: path.join(ROOT, 'app'), env, detached: true, stdio: ['ignore', out, err], windowsHide: true });
       child.on('error', e => log('erreur de lancement du serveur: ' + e.message));
