@@ -139,14 +139,28 @@ public final class MainActivity extends Activity {
     private EditText pinInput(String hint) {
         EditText e = field(hint, prefs.getBoolean("pinKeyboardText", false) ? PIN_TEXT : PIN_NUMBERS);
         e.setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());
+        addEye(e);
         return e;
+    }
+    private static android.text.method.TransformationMethod hiding(EditText e) { return Boolean.TRUE.equals(e.getTag()) ? android.text.method.HideReturnsTransformationMethod.getInstance() : android.text.method.PasswordTransformationMethod.getInstance(); }
+    /** An eye at the end of the code field: tap to read what was typed, tap again to hide it. */
+    private void addEye(final EditText e) {
+        e.setTag(Boolean.FALSE); e.setCompoundDrawablePadding(dp(8));
+        final Runnable draw = () -> { Drawable d = icon(Boolean.TRUE.equals(e.getTag()) ? "eye_off" : "eye", 22, MUTED); e.setCompoundDrawablesRelative(null, null, d, null); };
+        draw.run();
+        e.setOnTouchListener((v, event) -> {
+            if (event.getAction() == android.view.MotionEvent.ACTION_UP && event.getX() > e.getWidth() - e.getPaddingRight() - dp(46)) {
+                e.setTag(!Boolean.TRUE.equals(e.getTag())); int at = e.getSelectionEnd(); e.setTransformationMethod(hiding(e)); e.setSelection(Math.max(0, Math.min(at, e.length()))); draw.run(); v.performClick(); return true;
+            }
+            return false;
+        });
     }
     private TextView pinKeyboardSwitch(final EditText target) {
         final boolean[] text = { prefs.getBoolean("pinKeyboardText", false) };
         final TextView t = text(text[0] ? "Revenir au clavier chiffres" : "Mon code contient des lettres : clavier complet", 13, GREEN_BRIGHT, true); t.setPadding(0, dp(10), 0, dp(2));
         t.setOnClickListener(v -> {
             text[0] = !text[0]; prefs.edit().putBoolean("pinKeyboardText", text[0]).apply();
-            target.setInputType(text[0] ? PIN_TEXT : PIN_NUMBERS); target.setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance()); target.setSelection(target.getText().length());
+            target.setInputType(text[0] ? PIN_TEXT : PIN_NUMBERS); target.setTransformationMethod(hiding(target)); target.setSelection(target.getText().length());
             t.setText(text[0] ? "Revenir au clavier chiffres" : "Mon code contient des lettres : clavier complet");
         });
         return t;
@@ -164,7 +178,9 @@ public final class MainActivity extends Activity {
         android.widget.CheckBox b = new android.widget.CheckBox(this); b.setText("Mémoriser mon code sur ce téléphone (ne plus le demander)"); b.setTextSize(13); b.setTextColor(INK); b.setPadding(dp(4), dp(12), 0, dp(2)); return b;
     }
     private EditText field(String hint, int inputType) {
-        EditText e = new EditText(this); e.setSingleLine(true); e.setTextSize(16); e.setHint(hint); e.setInputType(inputType); e.setTextColor(INK); e.setHintTextColor(MUTED); e.setBackground(shape(Color.WHITE,LINE,11)); pad(e,13,2,13,2); return e;
+        EditText e = new EditText(this); e.setSingleLine(true); e.setTextSize(16); e.setHint(hint); e.setInputType(inputType); e.setTextColor(INK); e.setHintTextColor(MUTED); e.setBackground(shape(Color.WHITE,LINE,11)); pad(e,13,2,13,2);
+        e.setOnFocusChangeListener((v, focused) -> { if (focused) v.postDelayed(() -> v.requestRectangleOnScreen(new android.graphics.Rect(0, -dp(70), v.getWidth(), v.getHeight() + dp(150)), false), 350); });
+        return e;
     }
 
     private Button button(String title, boolean primary, String iconName, Runnable action) {
