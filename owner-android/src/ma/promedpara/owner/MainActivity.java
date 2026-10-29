@@ -47,19 +47,26 @@ public final class MainActivity extends Activity {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private SharedPreferences prefs;
     private JSONArray currentSuppliers;
-    private EditText serverField, codeField;
+    private EditText serverField, codeField, pinField;
+    private boolean unlocked; private long pausedAt;
     private LinearLayout root;
     private boolean receiverRegistered;
     private final BroadcastReceiver eventReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) { if (intent != null && intent.getBooleanExtra("refresh", false)) loadDashboard(); }
     };
 
-    @Override protected void onResume() { super.onResume(); if (prefs != null) Updater.check(this, prefs.getString("server", ""), "PromedPara-Owner.apk"); }
+    @Override protected void onPause() { super.onPause(); pausedAt = System.currentTimeMillis(); }
+    @Override protected void onResume() {
+        super.onResume();
+        if (prefs == null) return;
+        if (unlocked && pausedAt > 0 && System.currentTimeMillis() - pausedAt > 120000 && !prefs.getString("deviceToken", "").isEmpty()) { unlocked = false; pausedAt = 0; showUnlock(); return; }
+        Updater.check(this, prefs.getString("server", ""), "PromedPara-Owner.apk");
+    }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         SystemBars.apply(this, HEADER, BG);
-        if (prefs.getString("cookie", "").isEmpty() && prefs.getString("deviceToken", "").isEmpty()) showLogin(); else verifySession();
+        if (prefs.getString("deviceToken", "").isEmpty()) showLogin(); else showUnlock();
     }
 
     @Override protected void onStart() {
@@ -145,6 +152,7 @@ public final class MainActivity extends Activity {
         serverField=field("http://192.168.1.10:4173",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI); serverField.setText(Relay.isRelayAddress(prefs.getString("server",""))?"":prefs.getString("server","")); card.addView(serverField,lp(-1,54));
         TextView note=text("Dans la fenêtre « Connecter mon téléphone » de la caisse : adresse locale (Wi‑Fi) ou adresse internet (https://…) pour fonctionner sans Wi‑Fi.",12,MUTED,false); LinearLayout.LayoutParams np=lp(-1,-2); np.topMargin=dp(6); card.addView(note,np);
         card.addView(label("CODE D’ASSOCIATION (12 CARACTÈRES)")); codeField=field("XXXX XXXX XXXX",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); codeField.setLetterSpacing(.12f); groupCode(codeField); card.addView(codeField,lp(-1,56));
+        card.addView(label("VOTRE CODE PERSONNEL (CELUI DE LA CAISSE)")); pinField=field("Code personnel",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD); card.addView(pinField,lp(-1,56));
         Button pair=button("Associer ce téléphone",true,"smartphone",this::pair); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
         Button ring=button("Demander un code à l’administrateur",false,"bell",this::askAdminForCode); LinearLayout.LayoutParams rp=lp(-1,54); rp.topMargin=dp(10); card.addView(ring,rp);
         LinearLayout steps=column(); pad(steps,19,14,19,14); steps.setBackground(shape(Color.rgb(233,243,236),0,14)); LinearLayout.LayoutParams stp=lp(-1,-2); stp.setMargins(dp(16),0,dp(16),dp(12)); root.addView(steps,stp);
@@ -177,12 +185,14 @@ public final class MainActivity extends Activity {
 
     private void pair() {
         String base=normalize(serverField.getText().toString()), code=codeField.getText().toString().toUpperCase(Locale.ROOT).replaceAll("[^A-F0-9]","");
+        final String pin=pinField==null?"":pinField.getText().toString().trim();
         if(base.isEmpty() || code.length()!=12){toast("Entrez l’adresse du poste et le code d’association à 12 caractères.");return;}
+        if(pin.isEmpty()){toast("Entrez aussi votre code personnel (celui que vous tapez sur la caisse).");return;}
         prefs.edit().putString("server",base).apply();
         setBusy(true);
         io.execute(() -> {
             try {
-                JSONObject body=new JSONObject().put("code",code).put("deviceName",Build.MANUFACTURER+" "+Build.MODEL);
+                JSONObject body=new JSONObject().put("code",code).put("pin",pin).put("deviceName",Build.MANUFACTURER+" "+Build.MODEL);
                 Result result=Relay.isRelayAddress(base)?Relay.enroll(base,code,body.toString()):request(base+"/api/owner/enroll","POST",null,body.toString());
                 JSONObject json=new JSONObject(result.body);
                 if(result.status<200||result.status>=300) throw new Exception(json.optString("error","Association impossible."));
@@ -192,8 +202,39 @@ public final class MainActivity extends Activity {
                 if(token.isEmpty()||result.cookie.isEmpty()) throw new Exception("Réponse inattendue du poste.");
                 if(Relay.isRelayAddress(base)){String relayKey=json.optString("key","");if(relayKey.length()!=64)throw new Exception("Réponse inattendue de la caisse.");prefs.edit().putString("relayKey",relayKey).apply();}else prefs.edit().remove("relayKey").apply();
                 prefs.edit().putString("cookie",result.cookie).putString("deviceToken",token).putString("ownerName",account.optString("name","Propriétaire")).putBoolean("monitoring",false).remove("last_seq").apply();
-                runOnUiThread(() -> { setBusy(false); hideKeyboard(); showDashboard(null); });
+                runOnUiThread(() -> { unlocked=true; setBusy(false); hideKeyboard(); showDashboard(null); });
             } catch(Exception e) { runOnUiThread(() -> {setBusy(false);toast(message(e));}); }
+        });
+    }
+
+    /** Opening the app (or coming back after two minutes) asks for the owner's personal code, checked by the till. */
+    private void showUnlock() {
+        unlocked=false;
+        begin("Propriétaire","Application verrouillée","Entrez votre code personnel (celui de la caisse) pour voir votre boutique.",false);
+        LinearLayout card=column(); pad(card,19,15,19,19); card.setBackground(shape(Color.WHITE,LINE,17));
+        LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);
+        card.addView(label("VOTRE CODE PERSONNEL"));
+        pinField=field("Code personnel",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD); pinField.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        pinField.setOnEditorActionListener((v,actionId,event)->{unlock();return true;});
+        card.addView(pinField,lp(-1,56));
+        Button go=button("Déverrouiller",true,"lock_keyhole",this::unlock); LinearLayout.LayoutParams gp=lp(-1,58); gp.topMargin=dp(19); card.addView(go,gp);
+        Button forgot=button("J’ai oublié mon code : réassocier ce téléphone",false,"smartphone",()->new android.app.AlertDialog.Builder(this).setTitle("Réassocier ce téléphone ?").setMessage("Le téléphone sera dissocié de la caisse. Il faudra un nouveau code d’association (bouton « Connecter mon téléphone » sur la caisse) et votre code personnel. Si vous avez oublié votre code, utilisez « Mon code » sur la caisse.").setNegativeButton("Annuler",null).setPositiveButton("Réassocier",(d,w)->logout()).show());
+        LinearLayout.LayoutParams fp=lp(-1,54); fp.topMargin=dp(10); card.addView(forgot,fp);
+        pinField.requestFocus();
+        new android.os.Handler().postDelayed(()->{try{((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(pinField,0);}catch(Exception ignored){}},300);
+    }
+    private void unlock() {
+        final String pin=pinField==null?"":pinField.getText().toString().trim();
+        if(pin.isEmpty()){toast("Entrez votre code personnel.");return;}
+        pinField.setEnabled(false);
+        io.execute(() -> {
+            try {
+                Result r=call(prefs,"/api/owner/unlock","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).put("pin",pin).toString());
+                if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){ prefs.edit().putString("cookie",r.cookie).apply(); runOnUiThread(() -> { unlocked=true; hideKeyboard(); showDashboard(null); }); return; }
+                final String msg=new JSONObject(r.body).optString("error","Code incorrect.");
+                if(r.status==401&&msg.contains("non reconnu")){ prefs.edit().remove("cookie").remove("alertCookie").remove("deviceToken").remove("relayKey").putBoolean("monitoring",false).apply(); runOnUiThread(() -> { toast(msg); showLogin(); }); return; }
+                runOnUiThread(() -> { pinField.setEnabled(true); pinField.setText(""); pinField.requestFocus(); toast(msg); });
+            } catch(Exception e) { runOnUiThread(() -> { pinField.setEnabled(true); toast(message(e)); }); }
         });
     }
 
@@ -257,7 +298,7 @@ public final class MainActivity extends Activity {
     }
 
     private void loadDashboard() {
-        io.execute(() -> {try{Result r=requestAuthed(prefs,"/api/overview","GET",null);if(r.status==401||r.status==403){prefs.edit().remove("cookie").remove("deviceToken").putBoolean("monitoring",false).apply();runOnUiThread(()->{toast("Ce téléphone n’est plus associé à la caisse. Associez-le à nouveau.");showLogin();});return;}JSONObject j=new JSONObject(r.body);if(r.status<200||r.status>=300)throw new Exception(j.optString("error","Chargement impossible."));JSONArray suppliers=null;try{Result sr=requestAuthed(prefs,"/api/suppliers","GET",null);if(sr.status>=200&&sr.status<300)suppliers=new JSONObject(sr.body).optJSONArray("suppliers");}catch(Exception ignored){}JSONArray finalSuppliers=suppliers;runOnUiThread(()->{currentSuppliers=finalSuppliers;showDashboard(j);});}catch(Exception e){runOnUiThread(()->toast("Connexion au poste impossible. Vérifiez le Wi‑Fi puis actualisez."));}});
+        io.execute(() -> {try{Result r=requestAuthed(prefs,"/api/overview","GET",null);if(r.status==401||r.status==403){runOnUiThread(this::showUnlock);return;}JSONObject j=new JSONObject(r.body);if(r.status<200||r.status>=300)throw new Exception(j.optString("error","Chargement impossible."));JSONArray suppliers=null;try{Result sr=requestAuthed(prefs,"/api/suppliers","GET",null);if(sr.status>=200&&sr.status<300)suppliers=new JSONObject(sr.body).optJSONArray("suppliers");}catch(Exception ignored){}JSONArray finalSuppliers=suppliers;runOnUiThread(()->{currentSuppliers=finalSuppliers;showDashboard(j);});}catch(Exception e){runOnUiThread(()->toast("Connexion au poste impossible. Vérifiez le Wi‑Fi puis actualisez."));}});
     }
 
     private void requestNotificationPermissionAndStart() {
@@ -270,11 +311,12 @@ public final class MainActivity extends Activity {
     }
     private void stopMonitoring() { prefs.edit().putBoolean("monitoring",false).apply();stopService(new Intent(this,MonitorService.class));toast("Surveillance arrêtée.");loadDashboard(); }
     private void logout() {
+        unlocked=false;
         prefs.edit().putBoolean("monitoring",false).apply(); stopService(new Intent(this,MonitorService.class));
-        io.execute(()->{String base=prefs.getString("server","");try{call(prefs,"/api/owner/device-logout","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).toString());}catch(Exception ignored){}try{call(prefs,"/api/logout","POST",prefs.getString("cookie",""),"{}");}catch(Exception ignored){}prefs.edit().remove("cookie").remove("deviceToken").remove("ownerName").remove("relayKey").apply();runOnUiThread(this::showLogin);});
+        io.execute(()->{String base=prefs.getString("server","");try{call(prefs,"/api/owner/device-logout","POST",null,new JSONObject().put("deviceToken",prefs.getString("deviceToken","")).toString());}catch(Exception ignored){}try{call(prefs,"/api/logout","POST",prefs.getString("cookie",""),"{}");}catch(Exception ignored){}prefs.edit().remove("cookie").remove("alertCookie").remove("deviceToken").remove("ownerName").remove("relayKey").apply();runOnUiThread(this::showLogin);});
     }
 
-    private void setBusy(boolean busy) { if(codeField!=null)codeField.setEnabled(!busy); if(serverField!=null)serverField.setEnabled(!busy); }
+    private void setBusy(boolean busy) { if(pinField!=null)pinField.setEnabled(!busy); if(codeField!=null)codeField.setEnabled(!busy); if(serverField!=null)serverField.setEnabled(!busy); }
     private void hideKeyboard(){try{((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(root.getWindowToken(),0);}catch(Exception ignored){}}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
     private String normalize(String input){String s=input.trim();if(s.isEmpty())return "";if(Relay.isRelayAddress(s))return Relay.clean(s);if(!s.contains("://"))s="http://"+s;if(!s.matches("(?i)^https?://[^/]+(?::\\d+)?/?$"))return "";return s.replaceAll("/+$","");}
@@ -287,15 +329,19 @@ public final class MainActivity extends Activity {
     // A request with the saved session; when the till says the session expired, the paired phone signs in again by itself.
     static Result requestAuthed(SharedPreferences prefs,String path,String method,String json)throws Exception {
         String base=prefs.getString("server","");
-        Result r=call(prefs,path,method,prefs.getString("cookie",""),json);
-        if(r.status==401&&refreshSession(prefs))r=call(prefs,path,method,prefs.getString("cookie",""),json);
+        return call(prefs,path,method,prefs.getString("cookie",""),json);
+    }
+    /** Background alerts: the device token alone is enough, but it only ever opens an alerts-only session. */
+    static Result requestAlerts(SharedPreferences prefs,String path,String method,String json)throws Exception {
+        Result r=call(prefs,path,method,prefs.getString("alertCookie",""),json);
+        if((r.status==401||r.status==403)&&refreshSession(prefs))r=call(prefs,path,method,prefs.getString("alertCookie",""),json);
         return r;
     }
     static boolean refreshSession(SharedPreferences prefs) {
         String token=prefs.getString("deviceToken",""),base=prefs.getString("server","");
         if(token.isEmpty()||base.isEmpty())return false;
         try{Result r=call(prefs,"/api/owner/device-login","POST",null,new JSONObject().put("deviceToken",token).toString());
-            if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){prefs.edit().putString("cookie",r.cookie).apply();return true;}
+            if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){prefs.edit().putString("alertCookie",r.cookie).apply();return true;}
         }catch(Exception ignored){}
         return false;
     }

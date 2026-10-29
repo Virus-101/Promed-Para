@@ -113,16 +113,27 @@ const totp = (secretHex, step) => {
   r = await owner('GET', '/api/me'); const adminId = r.json.user.id;
   r = await cashier('POST', '/api/team/' + bossId + '/owner-pairing'); ok('a worker cannot create an owner pairing code', r.status === 403 || r.status === 401, r);
   r = await boss('POST', '/api/team/' + adminId + '/owner-pairing'); ok('an owner cannot pair a phone to the admin account', r.status === 403, r);
+  r = await boss('POST', '/api/change-pin', { newPin: 'Hamid-Code-77' }); ok('the owner chooses a personal code', r.status === 200, r);
   r = await boss('POST', '/api/team/' + bossId + '/owner-pairing'); ok('an owner can pair a phone to their own account', r.status === 201 && /^[A-F0-9]{12}$/.test(r.json.code) && r.json.kind === 'owner', r);
   const phoneCode = r.json.code;
   r = await anon('POST', '/api/owner/enroll', { code: 'AAAAAAAAAAAA' }); ok('wrong pairing code refused', r.status === 401, r);
-  const ownerPhone = jar(); r = await ownerPhone('POST', '/api/owner/enroll', { code: phoneCode.slice(0, 4) + '-' + phoneCode.slice(4), deviceName: 'Pixel de test' });
+  r = await anon('POST', '/api/owner/enroll', { code: phoneCode, pin: 'not-my-code', deviceName: 'Intrus' }); ok('pairing needs the owner\'s personal code too', r.status === 401 && /personnel/.test(r.json.error), r);
+  r = await anon('POST', '/api/owner/enroll', { code: phoneCode, deviceName: 'Sans code' }); ok('pairing without the personal code is refused', r.status === 401, r);
+  const ownerPhone = jar(); r = await ownerPhone('POST', '/api/owner/enroll', { code: phoneCode.slice(0, 4) + '-' + phoneCode.slice(4), pin: 'Hamid-Code-77', deviceName: 'Pixel de test' });
   ok('phone enrolls (dashes tolerated) and gets a long device token + a session', r.status === 201 && /^[a-f0-9]{64}$/.test(r.json.deviceToken) && r.json.user.role === 'owner', r);
   const deviceToken = r.json.deviceToken;
   r = await ownerPhone('GET', '/api/overview'); ok('the enrolment session can read the owner dashboard', r.status === 200, r);
   r = await anon('POST', '/api/owner/enroll', { code: phoneCode }); ok('a pairing code works only once', r.status === 401, r);
   const ownerPhone2 = jar(); r = await ownerPhone2('POST', '/api/owner/device-login', { deviceToken }); ok('device token signs the phone in later without any code or password', r.status === 200 && r.json.user.role === 'owner', r);
-  r = await ownerPhone2('GET', '/api/overview'); ok('device-login session works', r.status === 200, r);
+  r = await ownerPhone2('GET', '/api/overview'); ok('the device token alone gives alerts only: the dashboard is refused', r.status === 403 && /code personnel/.test(r.json.error), r);
+  r = await ownerPhone2('GET', '/api/notifications?afterSeq=0'); ok('...but alerts still arrive', r.status === 200, r);
+  r = await ownerPhone2('GET', '/api/team'); ok('...and nothing else is reachable', r.status === 403, r);
+  const ownerPhone3 = jar();
+  r = await ownerPhone3('POST', '/api/owner/unlock', { deviceToken, pin: 'wrong-code' }); ok('unlocking with a wrong personal code is refused', r.status === 401, r);
+  r = await ownerPhone3('POST', '/api/owner/unlock', { deviceToken, pin: 'Hamid-Code-77' }); ok('unlocking with the personal code opens a full session', r.status === 200, r);
+  r = await ownerPhone3('GET', '/api/overview'); ok('...and the dashboard is readable', r.status === 200, r);
+  for (let i = 0; i < 5; i++) await anon('POST', '/api/owner/unlock', { deviceToken, pin: 'guess-' + i });
+  r = await anon('POST', '/api/owner/unlock', { deviceToken, pin: 'Hamid-Code-77' }); ok('five wrong codes lock the phone for a while, even with the right code', r.status === 429, r);
   r = await anon('POST', '/api/owner/device-login', { deviceToken: 'a'.repeat(64) }); ok('unknown token refused', r.status === 401, r);
   r = await anon('POST', '/api/owner/device-login', { deviceToken: 'nonsense' }); ok('malformed token refused', r.status === 401, r);
   r = await boss('GET', '/api/team'); const bossCard = r.json.users.find(u => u.id === bossId);
@@ -131,7 +142,7 @@ const totp = (secretHex, step) => {
   r = await cashier('DELETE', '/api/owner/devices/' + oneDevice); ok('a worker cannot revoke a phone', r.status === 403 || r.status === 401, r);
   r = await owner('DELETE', '/api/owner/devices/' + oneDevice); ok('the admin can revoke an owner phone', r.status === 200, r);
   r = await anon('POST', '/api/owner/device-login', { deviceToken }); ok('a revoked phone can no longer sign in', r.status === 401, r);
-  r = await boss('POST', '/api/team/' + bossId + '/owner-pairing'); const code2 = r.json.code; r = await jar()('POST', '/api/owner/enroll', { code: code2, deviceName: 'Second' }); const token2 = r.json.deviceToken;
+  r = await boss('POST', '/api/team/' + bossId + '/owner-pairing'); const code2 = r.json.code; r = await jar()('POST', '/api/owner/enroll', { code: code2, pin: 'Hamid-Code-77', deviceName: 'Second' }); const token2 = r.json.deviceToken;
   r = await anon('POST', '/api/owner/device-logout', { deviceToken: token2 }); ok('logging out of the app deactivates the phone on the till', r.status === 200, r);
   r = await anon('POST', '/api/owner/device-login', { deviceToken: token2 }); ok('...and its token stops working', r.status === 401, r);
 

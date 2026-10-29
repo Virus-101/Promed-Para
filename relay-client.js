@@ -8,7 +8,7 @@ const https = require('https');
 const crypto = require('crypto');
 
 const WORKER_ALLOWED = [['POST', '/api/qr-login/approve']];
-const ALLOWED = [['POST', '/api/owner/device-login'], ['POST', '/api/owner/device-logout'], ['GET', '/api/overview'], ['GET', '/api/notifications'], ['GET', '/api/me'], ['POST', '/api/logout']];
+const ALLOWED = [['POST', '/api/owner/device-login'], ['POST', '/api/owner/unlock'], ['POST', '/api/owner/device-logout'], ['GET', '/api/overview'], ['GET', '/api/notifications'], ['GET', '/api/me'], ['POST', '/api/logout']];
 const MAX_SKEW_MS = 5 * 60000;
 
 function seal(key, text) {

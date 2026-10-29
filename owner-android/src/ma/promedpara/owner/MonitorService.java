@@ -30,7 +30,7 @@ public final class MonitorService extends Service {
 
     @Override public void onCreate(){super.onCreate();prefs=getSharedPreferences(MainActivity.PREFS,MODE_PRIVATE);createChannels();}
     @Override public int onStartCommand(Intent intent,int flags,int startId){
-        if(!prefs.getBoolean("monitoring",false)||prefs.getString("cookie","").isEmpty()){stopSelf();return START_NOT_STICKY;}
+        if(!prefs.getBoolean("monitoring",false)||prefs.getString("deviceToken","").isEmpty()){stopSelf();return START_NOT_STICKY;}
         Notification notification=monitorNotification("Connexion au poste local…");
         if(Build.VERSION.SDK_INT>=29)startForeground(FOREGROUND_ID,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);else startForeground(FOREGROUND_ID,notification);
         if(!running){running=true;worker=new Thread(this::watch,"PromedPara-SSE");worker.start();}
@@ -62,7 +62,7 @@ public final class MonitorService extends Service {
         boolean first=!prefs.contains("last_seq");
         for(int page=0;page<10&&running;page++){
             long after=prefs.getLong("last_seq",0);
-            MainActivity.Result result=MainActivity.requestAuthed(prefs,"/api/notifications?afterSeq="+after,"GET",null);
+            MainActivity.Result result=MainActivity.requestAlerts(prefs,"/api/notifications?afterSeq="+after,"GET",null);
             if(result.status==401||result.status==403){alert("Reconnectez-vous à PromedPara","Ce téléphone n’est plus associé à la caisse. Ouvrez l’application et associez-le à nouveau.",System.currentTimeMillis());prefs.edit().putBoolean("monitoring",false).apply();return;}
             if(result.status<200||result.status>=300)throw new Exception("Caisse indisponible");
             JSONArray list=new JSONObject(result.body).optJSONArray("notifications");if(list==null||list.length()==0){if(first)prefs.edit().putLong("last_seq",after).apply();break;}
@@ -77,7 +77,7 @@ public final class MonitorService extends Service {
         while(running&&prefs.getBoolean("monitoring",false)){
             HttpURLConnection connection=null;
             try{
-                String base=prefs.getString("server","").replaceAll("/+$","");String cookie=prefs.getString("cookie","");
+                String base=prefs.getString("server","").replaceAll("/+$","");String cookie=prefs.getString("alertCookie","");
                 connection=(HttpURLConnection)new URL(base+"/api/events").openConnection();currentConnection=connection;connection.setRequestMethod("GET");connection.setConnectTimeout(9000);connection.setReadTimeout(70000);connection.setRequestProperty("Accept","text/event-stream");connection.setRequestProperty("Cookie",cookie);connection.setRequestProperty("Cache-Control","no-cache");
                 int status=connection.getResponseCode();
                 if((status==401||status==403)&&MainActivity.refreshSession(prefs)){setStatus("Session renouvelée · reconnexion…");continue;}
@@ -108,7 +108,7 @@ public final class MonitorService extends Service {
         try{
             String base=prefs.getString("server","").replaceAll("/+$","");String cookie=prefs.getString("cookie","");
             for(int page=0;page<10&&running;page++){
-                long after=prefs.getLong("last_seq",0);MainActivity.Result result=MainActivity.requestAuthed(prefs,"/api/notifications?afterSeq="+after,"GET",null);
+                long after=prefs.getLong("last_seq",0);MainActivity.Result result=MainActivity.requestAlerts(prefs,"/api/notifications?afterSeq="+after,"GET",null);
                 JSONObject json=new JSONObject(result.body);if(result.status<200||result.status>=300)throw new Exception("Notification sync failed");JSONArray list=json.optJSONArray("notifications");if(list==null||list.length()==0)break;
                 for(int i=0;i<list.length();i++){JSONObject n=list.optJSONObject(i);handleNotification(n);}
                 if(list.length()<500)break;

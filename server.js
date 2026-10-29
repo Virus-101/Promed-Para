@@ -183,11 +183,14 @@ const cookieToken = request => {
 const currentUser = request => {
   const session = sessions.get(cookieToken(request));
   if (!session || session.expires < Date.now()) return null;
-  return db.prepare('SELECT id,name,username,role,active,can_receive_stock FROM users WHERE id=?').get(session.userId) || null;
+  const row = db.prepare('SELECT id,name,username,role,active,can_receive_stock FROM users WHERE id=?').get(session.userId);
+  return row ? Object.assign({}, row, { scope: session.scope || 'full' }) : null;
 };
 const requireUser = request => {
   const user = currentUser(request);
   if (!user || !user.active) throw new HttpError(401, 'Connectez-vous pour continuer.');
+  // a phone that only proved its device token (no personal code) may receive alerts, nothing else
+  if (user.scope === 'alerts' && !/^\/api\/(notifications|events|me|logout|owner\/)/.test(String(request.url || '').split('?')[0])) throw new HttpError(403, 'Entrez votre code personnel dans l’application pour voir les données.');
   lastActivityAt = Date.now();
   return user;
 };
@@ -258,6 +261,7 @@ const isLoopback = address => address === '127.0.0.1' || address === '::1' || ad
 // requests that arrive through the internet relay come from 127.0.0.1 too, but carry this header: they are never the till itself
 const isLocal = request => isLoopback(request.socket.remoteAddress) && !request.headers['x-promed-relay'];
 const livePairingCodes = new Map();
+const ownerPairTries = new Map(), ownerUnlockFails = new Map();
 // QR login: the till shows a QR code, the worker's paired phone approves it with a proof only that phone can compute
 const qrChallenges = new Map(), qrById = new Map();
 let ringTimes = [];
@@ -283,9 +287,9 @@ const totpAt = (secretHex, step) => {
   return String(binary % 1_000_000).padStart(6, '0');
 };
 const shopClock = () => { const now = new Date(); return String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'); };   // the till's own clock, same as its screen
-const createSession = user => {
+const createSession = (user, scope) => {
   const token = randomBytes(32).toString('base64url');
-  sessions.set(token, { userId: user.id, expires: Date.now() + 12 * 60 * 60_000 });
+  sessions.set(token, { userId: user.id, expires: Date.now() + 12 * 60 * 60_000, scope: scope || 'full' });
   if (user.role === 'cashier') createNotification('Employé connecté', `${user.name} · a ouvert la caisse`, 'staff');
   return { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 60 * 60}` };
 };
@@ -921,8 +925,15 @@ async function api(request, response, url) {
     rateLimit(request, 'owner-enroll', 12);
     const body = await readBody(request), code = clean(body.code, 20).toUpperCase().replace(/[^A-F0-9]/g, '');
     if (!/^[A-F0-9]{12}$/.test(code)) throw new HttpError(401, 'Code d’association invalide ou expiré.');
-    const pairing = db.prepare("SELECT p.token_hash,p.user_id,u.id,u.name,u.username,u.role,u.active,u.can_receive_stock FROM owner_pairings p JOIN users u ON u.id=p.user_id WHERE p.token_hash=? AND p.expires_at>? AND u.active=1 AND u.role='owner'").get(sha256(code), isoNow());
+    const pairing = db.prepare("SELECT p.token_hash,p.user_id,u.id,u.name,u.username,u.role,u.active,u.can_receive_stock,u.pin_hash FROM owner_pairings p JOIN users u ON u.id=p.user_id WHERE p.token_hash=? AND p.expires_at>? AND u.active=1 AND u.role='owner'").get(sha256(code), isoNow());
     if (!pairing) throw new HttpError(401, 'Code d’association invalide ou expiré.');
+    if (!pairing.pin_hash) throw new HttpError(409, 'Créez d’abord votre code personnel sur la caisse (bouton « Mon code »).');
+    if (!passwordMatches(String(body.pin || '').trim(), pairing.pin_hash)) {
+      const tries = (ownerPairTries.get(pairing.token_hash) || 0) + 1; ownerPairTries.set(pairing.token_hash, tries);
+      if (tries >= 5) { db.prepare('DELETE FROM owner_pairings WHERE token_hash=?').run(pairing.token_hash); ownerPairTries.delete(pairing.token_hash); createNotification('Association de téléphone bloquée', pairing.name + ' · 5 codes personnels incorrects : le code d’association a été annulé.', 'security'); throw new HttpError(401, 'Trop d’essais. Demandez un nouveau code d’association.'); }
+      throw new HttpError(401, 'Votre code personnel est incorrect (c’est celui que vous tapez sur la caisse).');
+    }
+    ownerPairTries.delete(pairing.token_hash);
     const token = randomBytes(32).toString('hex'), deviceId = id('odev'), createdAt = isoNow(), deviceName = clean(body.deviceName, 60) || 'Téléphone';
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -940,7 +951,26 @@ async function api(request, response, url) {
     const device = db.prepare("SELECT d.id AS device_id,u.id,u.name,u.username,u.role,u.can_receive_stock FROM owner_devices d JOIN users u ON u.id=d.user_id WHERE d.token_hash=? AND d.active=1 AND u.active=1 AND u.role='owner'").get(sha256(token));
     if (!device) throw new HttpError(401, 'Téléphone non reconnu. Associez-le à nouveau.');
     db.prepare('UPDATE owner_devices SET last_seen_at=? WHERE id=?').run(isoNow(), device.device_id);
-    return send(response, 200, { user: userSafe(device) }, createSession(device));
+    return send(response, 200, { user: userSafe(device) }, createSession(device, 'alerts'));
+  }
+  if (route === '/api/owner/unlock' && request.method === 'POST') {
+    // opening the phone app: the device token AND the owner's personal code
+    rateLimit(request, 'owner-unlock', 30);
+    const body = await readBody(request), token = String(body.deviceToken || '');
+    if (!/^[a-f0-9]{64}$/.test(token)) throw new HttpError(401, 'Téléphone non reconnu. Associez-le à nouveau.');
+    const device = db.prepare("SELECT d.id AS device_id,u.id,u.name,u.username,u.role,u.can_receive_stock,u.pin_hash FROM owner_devices d JOIN users u ON u.id=d.user_id WHERE d.token_hash=? AND d.active=1 AND u.active=1 AND u.role='owner'").get(sha256(token));
+    if (!device) throw new HttpError(401, 'Téléphone non reconnu. Associez-le à nouveau.');
+    const failure = ownerUnlockFails.get(device.device_id) || { count: 0, until: 0 };
+    if (failure.until > Date.now()) throw new HttpError(429, 'Trop d’essais. Réessayez dans ' + Math.ceil((failure.until - Date.now()) / 60000) + ' minute(s).');
+    if (!device.pin_hash) throw new HttpError(409, 'Créez d’abord votre code personnel sur la caisse (bouton « Mon code »).');
+    if (!passwordMatches(String(body.pin || '').trim(), device.pin_hash)) {
+      failure.count++; if (failure.count >= 5) { failure.until = Date.now() + 10 * 60000; failure.count = 0; createNotification('Téléphone propriétaire : essais de code', device.name + ' · 5 codes personnels incorrects sur un téléphone. Il est bloqué 10 minutes.', 'security'); }
+      ownerUnlockFails.set(device.device_id, failure);
+      throw new HttpError(401, 'Code personnel incorrect.');
+    }
+    ownerUnlockFails.delete(device.device_id);
+    db.prepare('UPDATE owner_devices SET last_seen_at=? WHERE id=?').run(isoNow(), device.device_id);
+    return send(response, 200, { user: userSafe(device) }, createSession(device, 'full'));
   }
   if (route === '/api/owner/device-logout' && request.method === 'POST') {
     const body = await readBody(request), token = String(body.deviceToken || '');
