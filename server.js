@@ -160,7 +160,7 @@ const uniqueUsername = name => {
 };
 const normRecovery = key => String(key || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const isAdmin = userId => Boolean(accountFlags(userId).is_admin);
-const userSafe = user => { const flags = accountFlags(user.id); return { id: user.id, name: user.name, username: user.username, role: user.role, canReceiveStock: Boolean(user.can_receive_stock), canAddProducts: user.role !== 'owner' && productAccess(user.id), isAdmin: Boolean(flags.is_admin), mustChangePassword: Boolean(flags.must_change_password), hasPin: Boolean(flags.has_pin), mustSetPin: user.role === 'owner' && (Boolean(flags.must_change_password) || !flags.has_pin) }; };
+const userSafe = user => { const flags = accountFlags(user.id); return { id: user.id, name: user.name, username: user.username, role: user.role, canReceiveStock: Boolean(user.can_receive_stock), canAddProducts: user.role !== 'owner' && productAccess(user.id), isAdmin: Boolean(flags.is_admin), mustChangePassword: Boolean(flags.must_change_password), hasPin: Boolean(flags.has_pin), mustSetPin: user.role === 'owner' && (Boolean(flags.must_change_password) || !flags.has_pin), phones: user.role === 'owner' ? db.prepare('SELECT id,name,last_seen_at FROM owner_devices WHERE user_id=? AND active=1 ORDER BY created_at DESC').all(user.id) : undefined }; };
 const setting = key => db.prepare('SELECT setting_value FROM business_settings WHERE setting_key=?').get(key)?.setting_value || '';
 const passwordHash = password => {
   const salt = randomBytes(16);
