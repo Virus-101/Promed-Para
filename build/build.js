@@ -127,7 +127,7 @@ for (const file of walk(OUT, [])) {
 const lines = [];
 for (const file of walk(OUT, []).sort()) {
   const rel = path.relative(OUT, file);
-  if (rel === 'MANIFEST.sha256' || rel.startsWith('RAPPORT-') || rel.startsWith('config' + path.sep)) continue;
+  if (rel === 'MANIFEST.sha256' || /^(data|logs)([-\/]|$)/.test(rel) || rel.startsWith('RAPPORT-') || rel.startsWith('config' + path.sep)) continue;
   lines.push(require('crypto').createHash('sha256').update(fs.readFileSync(file)).digest('hex') + '  ' + rel);
 }
 fs.writeFileSync(path.join(OUT, 'MANIFEST.sha256'), lines.join('\r\n') + '\r\n');
