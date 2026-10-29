@@ -174,7 +174,56 @@ public final class MainActivity extends Activity {
     }
 
     // ---- pairing (replaces the old username + password sign-in: owners have a 6-digit code on the till, not a password)
+    private EditText nameField;
+    /** The usual pairing screen: only the owner's name and personal code (the internet link is built into the app). */
     private void showLogin() {
+        begin("Propriétaire", "Votre boutique,\nen direct.", "Entrez le nom et le code personnel de votre compte sur la caisse. Rien d’autre.", true);
+        LinearLayout card=column(); pad(card,19,15,19,19); card.setBackground(shape(Color.WHITE,LINE,17));
+        LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);
+        card.addView(label("VOTRE NOM (COMME SUR LA CAISSE)"));
+        nameField=field("Nom du compte",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_WORDS|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); nameField.setText(prefs.getString("ownerName","")); if(Build.VERSION.SDK_INT>=26){nameField.setAutofillHints(View.AUTOFILL_HINT_USERNAME);nameField.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);} card.addView(nameField,lp(-1,56));
+        card.addView(label("VOTRE CODE PERSONNEL")); pinField=pinInput("Code personnel"); markPassword(pinField); card.addView(pinField,lp(-1,56)); card.addView(pinKeyboardSwitch(pinField)); rememberBox=rememberCheckbox(); card.addView(rememberBox);
+        Button pair=button("Connecter ce téléphone",true,"smartphone",this::pairDirect); LinearLayout.LayoutParams bp=lp(-1,58); bp.topMargin=dp(19); card.addView(pair,bp);
+        Button ring=button("Demander un code à l’administrateur",false,"bell",this::askAdminByName); LinearLayout.LayoutParams rp=lp(-1,54); rp.topMargin=dp(10); card.addView(ring,rp);
+        Button advanced=button("Connexion par adresse (avancé)",false,null,this::showLoginAdvanced); LinearLayout.LayoutParams ap=lp(-1,50); ap.topMargin=dp(8); card.addView(advanced,ap);
+        TextView foot=text("Le code personnel se crée sur la caisse (bouton « Mon code »).  ·  Version "+appVersion(),12,MUTED,false); foot.setGravity(Gravity.CENTER); LinearLayout.LayoutParams fp=lp(-1,-2); fp.setMargins(dp(28),dp(6),dp(28),dp(22)); root.addView(foot,fp);
+    }
+
+    private void pairDirect() {
+        final String name=nameField==null?"":nameField.getText().toString().trim(), pin=pinField==null?"":pinField.getText().toString().trim();
+        final boolean remember=rememberBox!=null&&rememberBox.isChecked();
+        if(name.length()<2){toast("Entrez votre nom (celui de votre compte sur la caisse).");return;}
+        if(pin.isEmpty()){toast("Entrez votre code personnel.");return;}
+        setBusy(true);
+        io.execute(() -> {
+            try {
+                Relay.Direct direct=Relay.enrollDirect(name,pin,Build.MANUFACTURER+" "+Build.MODEL);
+                Result result=direct.result; JSONObject json=new JSONObject(result.body);
+                JSONObject account=json.getJSONObject("user");
+                if(!"owner".equals(account.optString("role"))) throw new Exception("Ce compte n’a pas les droits propriétaire.");
+                String token=json.optString("deviceToken",""), relayKey=json.optString("key","");
+                if(token.isEmpty()||result.cookie.isEmpty()||relayKey.length()!=64) throw new Exception("Réponse inattendue de la caisse.");
+                prefs.edit().putString("server",Relay.clean(direct.address)).putString("relayKey",relayKey).putString("cookie",result.cookie).putString("deviceToken",token).putString("ownerName",account.optString("name",name)).putBoolean("monitoring",false).remove("last_seq").apply();
+                if(remember)CodeVault.save(prefs,pin); else CodeVault.forget(prefs);
+                runOnUiThread(() -> { commitAutofill(); unlocked=true; setBusy(false); hideKeyboard(); showDashboard(null); });
+            } catch(Exception e) { runOnUiThread(() -> {setBusy(false);toast(message(e));}); }
+        });
+    }
+
+    private void askAdminByName() {
+        final String name=nameField==null?"":nameField.getText().toString().trim();
+        if(name.length()<2){toast("Entrez d’abord votre nom.");return;}
+        setBusy(true);
+        io.execute(() -> {
+            try {
+                Result result=Relay.ringByName(name);
+                if(result.status<200||result.status>=300) throw new Exception(new JSONObject(result.body).optString("error","Demande refusée."));
+                runOnUiThread(() -> { setBusy(false); toast("L’administrateur a été prévenu. Attendez son code."); });
+            } catch(Exception e) { runOnUiThread(() -> {setBusy(false);toast(message(e));}); }
+        });
+    }
+
+    private void showLoginAdvanced() {
         begin("Propriétaire", "Votre boutique,\nen direct.", "Associez ce téléphone à la caisse : au Wi‑Fi de la boutique ou partout par internet.", true);
         LinearLayout card=column(); pad(card,19,15,19,19); card.setBackground(shape(Color.WHITE,LINE,17));
         LinearLayout.LayoutParams cp=lp(-1,-2); cp.setMargins(dp(16),dp(19),dp(16),dp(16)); root.addView(card,cp);

@@ -57,6 +57,7 @@ const server = http.createServer(async (req, res) => {
       const id = parts[1];
       if (parts.length === 2 && req.method === 'PUT') {          // register (idempotent)
         const token = req.headers['x-token'];
+        let info = {}; try { info = JSON.parse((await readBody(req)) || '{}'); } catch (error) { info = {}; }
         if (typeof token !== 'string' || !TOKEN.test(token)) return send(res, 400, { error: 'bad token' });
         const existing = tills.get(id);
         if (existing && !tillAuth(req, existing)) return send(res, 403, { error: 'forbidden' });
@@ -64,6 +65,10 @@ const server = http.createServer(async (req, res) => {
           if (tills.size >= 500) return send(res, 503, { error: 'full' });
           tills.set(id, { tokenHash: sha256(token), queue: [], parked: null, pending: new Map(), lastSeen: Date.now() });
         }
+        const entry = tills.get(id);
+        if (/^[a-f0-9]{130}$/.test(String(info.pub || ''))) entry.pub = info.pub;
+        if (Array.isArray(info.handles)) entry.handles = new Set(info.handles.map(String).filter(h => /^[a-f0-9]{64}$/.test(h)).slice(0, 40));
+        entry.lastSeen = Date.now();
         return send(res, 200, { ok: true });
       }
       const till = tills.get(id);
@@ -84,6 +89,14 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, { ok: true });
       }
       return send(res, 404, { error: 'not found' });
+    }
+
+    // ---- the phone asks which online till has an owner with this (hashed) name
+    if (parts[0] === 'h' && /^[a-f0-9]{64}$/.test(parts[1] || '') && req.method === 'GET') {
+      if (limited(ip, 30)) return send(res, 429, { error: 'too many requests' });
+      const found = [];
+      for (const [tillId, t] of tills) if (t.pub && t.handles && t.handles.has(parts[1]) && online(t)) found.push({ id: tillId, pub: t.pub });
+      return send(res, 200, { tills: found.slice(0, 5) });
     }
 
     // ---- phone side

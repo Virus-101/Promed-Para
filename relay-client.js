@@ -7,6 +7,7 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 
+const handleOf = name => crypto.createHash('sha256').update('promed-handle:' + String(name || '').trim().toLowerCase()).digest('hex');
 const WORKER_ALLOWED = [['POST', '/api/qr-login/approve']];
 const ALLOWED = [['POST', '/api/owner/device-login'], ['POST', '/api/owner/unlock'], ['POST', '/api/owner/device-logout'], ['GET', '/api/overview'], ['GET', '/api/notifications'], ['GET', '/api/me'], ['POST', '/api/logout']];
 const MAX_SKEW_MS = 5 * 60000;
@@ -35,6 +36,8 @@ function start(options) {
   }
   if (options.defaultUrl && !cfg.url) { cfg.url = options.defaultUrl; fs.writeFileSync(file, JSON.stringify(cfg, null, 2)); }
   if (!/^[a-f0-9]{64}$/.test(cfg.wkey || '')) { cfg.wkey = crypto.randomBytes(32).toString('hex'); fs.writeFileSync(file, JSON.stringify(cfg, null, 2)); }
+  if (!/^[a-f0-9]{64}$/.test(cfg.ecPriv || '')) { const made = crypto.createECDH('prime256v1'); made.generateKeys(); cfg.ecPriv = made.getPrivateKey('hex').padStart(64, '0'); fs.writeFileSync(file, JSON.stringify(cfg, null, 2)); }
+  const ecdh = crypto.createECDH('prime256v1'); ecdh.setPrivateKey(Buffer.from(cfg.ecPriv, 'hex'));
   const key = Buffer.from(cfg.key, 'hex'), workerKey = Buffer.from(cfg.wkey, 'hex');
   const state = { enabled: cfg.enabled !== false && Boolean(cfg.url), connected: false, lastOk: 0, lastAttempt: null, url: cfg.url || '', tillId: cfg.tillId, workerKey: cfg.wkey, address: '', stop: function () {} };
   const seen = new Map(), secret = crypto.randomBytes(16).toString('hex');
@@ -84,6 +87,9 @@ function start(options) {
       try { plain = open(key, message.d); usedKey = key; } catch (error) { plain = null; }
     } else if (message && message.m === 'w') {
       try { plain = open(workerKey, message.d); usedKey = workerKey; } catch (error) { plain = null; }
+    } else if (message && message.m === 'n') {
+      // name + personal code pairing: the key is agreed with the phone by ECDH (the till's public key is published through the relay)
+      try { usedKey = crypto.createHash('sha256').update(ecdh.computeSecret(Buffer.from(String(message.k || ''), 'hex'))).digest(); plain = open(usedKey, message.d); } catch (error) { plain = null; usedKey = null; }
     } else if (message && message.m === 'e') {
       for (const code of options.activeCodes()) {
         try { const k = enrollKey(code, cfg.tillId); plain = open(k, message.d); usedKey = k; break; } catch (error) { plain = null; }
@@ -100,7 +106,7 @@ function start(options) {
     let answer;
     if (!plain) {
       answer = JSON.stringify({ e: 'auth' });
-      if (message && message.m === 'e') state.lastAttempt = { at: Date.now(), ok: false, reason: 'code d’association incorrect ou expiré' };
+      if (message && (message.m === 'e' || message.m === 'n')) state.lastAttempt = { at: Date.now(), ok: false, reason: 'code d’association incorrect ou expiré' };
     }
     else {
       let request = null;
@@ -110,7 +116,8 @@ function start(options) {
       const fresh = Boolean(request) && typeof request.n === 'string' && request.n.length >= 8 && !seen.has(request.n) && Math.abs(now - Number(request.t)) < MAX_SKEW_MS;
       const method = request ? String(request.x || '').toUpperCase() : '', requestPath = request ? String(request.p || '').split('?')[0] : '';
       const enrollingWorker = message.m === 'e' && method === 'POST' && requestPath === '/api/worker/enroll';
-      const enrolling = enrollingWorker || (message.m === 'e' && method === 'POST' && requestPath === '/api/owner/enroll');
+      const enrollingDirect = message.m === 'n' && method === 'POST' && requestPath === '/api/owner/enroll-direct';
+      const enrolling = enrollingWorker || enrollingDirect || (message.m === 'e' && method === 'POST' && requestPath === '/api/owner/enroll');
       const allowed = enrolling || (message.m === 'k' && ALLOWED.some(rule => rule[0] === method && rule[1] === requestPath)) || (message.m === 'w' && WORKER_ALLOWED.some(rule => rule[0] === method && rule[1] === requestPath));
       let reply;
       if (!fresh) reply = { s: 400, c: '', b: JSON.stringify({ error: 'Requête expirée ou rejouée.' }) };
@@ -122,7 +129,7 @@ function start(options) {
           try { const data = JSON.parse(reply.b); data.key = enrollingWorker ? cfg.wkey : cfg.key; data.tillId = cfg.tillId; reply.b = JSON.stringify(data); } catch (error) { /* keep as is */ }
         }
       }
-      if (message.m === 'e') { let why = ''; try { why = JSON.parse(reply.b).error || ''; } catch (error) { why = ''; } state.lastAttempt = { at: Date.now(), ok: reply.s >= 200 && reply.s < 300, reason: why || (reply.s >= 200 && reply.s < 300 ? '' : 'refusé (' + reply.s + ')') }; }
+      if (message.m === 'e' || message.m === 'n') { let why = ''; try { why = JSON.parse(reply.b).error || ''; } catch (error) { why = ''; } state.lastAttempt = { at: Date.now(), ok: reply.s >= 200 && reply.s < 300, reason: why || (reply.s >= 200 && reply.s < 300 ? '' : 'refusé (' + reply.s + ')') }; }
       answer = JSON.stringify({ d: seal(usedKey, JSON.stringify({ n: request ? request.n : '', s: reply.s, c: reply.c, b: reply.b })) });
     }
     try { await call('POST', '/t/' + cfg.tillId + '/res/' + item.id, answer, 15000); } catch (error) { /* the phone will retry */ }
@@ -132,11 +139,13 @@ function start(options) {
     let delay = 2000;
     while (!stopped) {
       try {
-        const registered = await call('PUT', '/t/' + cfg.tillId, '', 20000);
+        const register = () => { let handles = []; try { handles = Array.from(new Set((options.ownerNames ? options.ownerNames() : []).filter(Boolean).map(handleOf))).slice(0, 40); } catch (error) { handles = []; } return call('PUT', '/t/' + cfg.tillId, JSON.stringify({ pub: ecdh.getPublicKey('hex'), handles: handles }), 20000); };
+        const registered = await register(); let registeredAt = Date.now();
         if (registered.status !== 200) throw new Error('register ' + registered.status);
         state.connected = true; state.lastOk = Date.now();
         for (;;) {
           if (stopped) return;
+          if (Date.now() - registeredAt > 60000) { try { await register(); registeredAt = Date.now(); } catch (error) { /* retried next round */ } }
           const next = await call('GET', '/t/' + cfg.tillId + '/next', '', 40000);
           if (next.status === 403) break;
           if (next.status === 200) { state.connected = true; state.lastOk = Date.now(); delay = 2000; handle(JSON.parse(next.text)).catch(() => {}); }
@@ -156,4 +165,4 @@ function start(options) {
   return state;
 }
 
-module.exports = { start: start, seal: seal, open: open, enrollKey: enrollKey };
+module.exports = { handleOf: handleOf, start: start, seal: seal, open: open, enrollKey: enrollKey };

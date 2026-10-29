@@ -921,7 +921,28 @@ async function api(request, response, url) {
     db.prepare('DELETE FROM owner_pairings WHERE user_id=? OR expires_at<=?').run(userId, createdAt);
     livePairingCodes.set(code, Date.now() + 5 * 60_000);
     db.prepare('INSERT INTO owner_pairings(token_hash,user_id,expires_at,created_at) VALUES(?,?,?,?)').run(sha256(code), userId, expiresAt, createdAt);
-    return send(response, 201, { code, expiresAt, kind: 'owner', remote: remoteLink.enabled ? { address: remoteLink.address, connected: remoteLink.connected } : null, serverUrls: ownerUrls(), workerUrls: ownerUrls().map(url => `${url}/owner-app`), workerApkUrls: ownerUrls().map(url => `${url}/PromedPara-Owner.apk`) });
+    return send(response, 201, { code, expiresAt, kind: 'owner', name: user.name, remote: remoteLink.enabled ? { address: remoteLink.address, connected: remoteLink.connected } : null, serverUrls: ownerUrls(), workerUrls: ownerUrls().map(url => `${url}/owner-app`), workerApkUrls: ownerUrls().map(url => `${url}/PromedPara-Owner.apk`) });
+  }
+  if (route === '/api/owner/enroll-direct' && request.method === 'POST') {
+    // the phone only knows the owner's name and personal code; the relay address is built into the app
+    rateLimit(request, 'owner-enroll-direct', 20);
+    const body = await readBody(request), wanted = clean(body.name, 80).toLowerCase();
+    const rows = db.prepare("SELECT id,name,username,role,active,can_receive_stock,pin_hash FROM users WHERE role='owner' AND active=1").all();
+    const user = wanted && rows.find(row => String(row.name).toLowerCase() === wanted || String(row.username).toLowerCase() === wanted);
+    if (!user) throw new HttpError(401, 'Nom ou code personnel incorrect.');
+    const failure = ownerPairTries.get('direct:' + user.id) || { count: 0, until: 0 };
+    if (failure.until > Date.now()) throw new HttpError(429, 'Trop d’essais. Réessayez dans ' + Math.ceil((failure.until - Date.now()) / 60000) + ' minute(s).');
+    if (!user.pin_hash) throw new HttpError(409, 'Créez d’abord votre code personnel sur la caisse (bouton « Mon code »).');
+    if (!passwordMatches(String(body.pin || '').trim(), user.pin_hash)) {
+      failure.count++; if (failure.count >= 5) { failure.until = Date.now() + 10 * 60000; failure.count = 0; createNotification('Association de téléphone bloquée', user.name + ' · 5 codes personnels incorrects : nouvel essai possible dans 10 minutes.', 'security'); }
+      ownerPairTries.set('direct:' + user.id, failure);
+      throw new HttpError(401, 'Nom ou code personnel incorrect.');
+    }
+    ownerPairTries.delete('direct:' + user.id);
+    const token = randomBytes(32).toString('hex'), deviceId = id('odev'), createdAt = isoNow(), deviceName = clean(body.deviceName, 60) || 'Téléphone';
+    db.prepare('INSERT INTO owner_devices(id,user_id,token_hash,name,created_at,last_seen_at) VALUES(?,?,?,?,?,?)').run(deviceId, user.id, sha256(token), deviceName, createdAt, createdAt);
+    createNotification('Téléphone propriétaire associé', user.name + ' · ' + deviceName, 'security');
+    return send(response, 201, { user: userSafe(user), deviceToken: token }, createSession(user));
   }
   if (route === '/api/owner/enroll' && request.method === 'POST') {
     rateLimit(request, 'owner-enroll', 12);
@@ -1145,7 +1166,7 @@ server.listen(PORT,HOST,()=>{
     };
     setTimeout(watchStaged, Number(process.env.PROMEDPARA_STAGED_FIRST_MS) || 60000); const timer = setInterval(watchStaged, 10 * 60000); if (timer.unref) timer.unref();
   } catch (error) { console.error('update notices:', error.message); }
-  try { remoteLink = require('./relay-client').start({ dataDir: DATA_DIR, port: PORT, defaultUrl: process.env.PROMEDPARA_RELAY_URL !== undefined ? process.env.PROMEDPARA_RELAY_URL : RELAY_URL, activeCodes: activePairingCodes }); } catch (error) { console.error('relay client:', error.message); }
+  try { remoteLink = require('./relay-client').start({ dataDir: DATA_DIR, port: PORT, defaultUrl: process.env.PROMEDPARA_RELAY_URL !== undefined ? process.env.PROMEDPARA_RELAY_URL : RELAY_URL, activeCodes: activePairingCodes, ownerNames: () => { const names = []; for (const row of db.prepare("SELECT name,username FROM users WHERE role='owner' AND active=1").all()) names.push(row.name, row.username); return names; } }); } catch (error) { console.error('relay client:', error.message); }
   console.log(`PromedPara local service: http://localhost:${PORT}`);
   for(const entries of Object.values(os.networkInterfaces()))for(const item of entries||[])if(item.family==='IPv4'&&!item.internal)console.log(`Owner phone (same Wi-Fi): http://${item.address}:${PORT}`);
 });for (const signal of ['SIGINT','SIGTERM']) process.on(signal,()=>{server.close();db.close();process.exit(0)});
