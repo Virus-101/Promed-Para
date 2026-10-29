@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const FLUSH_DELAY_MS = 250;
+const FLUSH_DELAY_MS = 60;
 const KEEP_BACKUPS = 30;
 
 function dayStamp() {

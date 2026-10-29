@@ -360,9 +360,13 @@ async function api(request, response, url) {
   }
   if (route === '/api/login' && request.method === 'POST') {
     const body = await readBody(request);
-    const username = clean(body.username, 50).toLowerCase();
-    const user = db.prepare('SELECT * FROM users WHERE username=? AND active=1').get(username);
-    if (!user || !passwordMatches(String(body.password || ''), user.password_hash)) throw new HttpError(401, 'Identifiant ou mot de passe incorrect.');
+    rateLimit(request, 'login', 15);
+    const username = clean(body.username, 50).toLowerCase(), secret = String(body.password || '').trim();
+    // the person may type a username or their full name, and either an old password or their personal code (code: on the till only)
+    const user = db.prepare('SELECT * FROM users WHERE active=1 AND (username=? OR lower(name)=?)').get(username, username);
+    let allowed = Boolean(user) && passwordMatches(secret, user.password_hash);
+    if (!allowed && user && user.pin_hash && isLoopback(request.socket.remoteAddress)) allowed = passwordMatches(secret, user.pin_hash);
+    if (!allowed) throw new HttpError(401, 'Nom ou code incorrect.');
     const token = randomBytes(32).toString('base64url'); sessions.set(token, { userId: user.id, expires: Date.now() + 30 * 86400_000 });
     return send(response, 200, { user: userSafe(user) }, { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 86400}` });
   }

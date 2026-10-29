@@ -34,6 +34,8 @@ const jar = () => { let cookie = ''; return async (method, url, body) => {
   let recoveryKey = r.json.recoveryKey;
   r = await admin('GET', '/api/me'); ok('setup signs the admin in; admin flags correct', r.json.user.isAdmin && r.json.user.hasPin && !r.json.user.mustSetPin, r.json);
   r = await anon('POST', '/api/setup', { name: 'Intrus', pin: '735192' }); ok('setup cannot be repeated', r.status === 409, r);
+  r = await anon('POST', '/api/login', { username: 'hicham', password: '482913' }); ok('login with the name (any case) and personal code', r.status === 200 && r.json.user.isAdmin, r);
+  r = await anon('POST', '/api/login', { username: 'Hicham', password: '482914' }); ok('wrong code through the name form is refused', r.status === 401, r);
 
   const s1 = jar(); r = await s1('POST', '/api/worker/pin-login', { pin: '482913' }); ok('admin signs in with just the code', r.status === 200 && r.json.user.isAdmin === true, r);
   r = await anon('POST', '/api/worker/pin-login', { pin: '111222' }); ok('wrong code refused', r.status === 401, r);
