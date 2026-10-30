@@ -531,7 +531,7 @@ async function api(request, response, url) {
       try { remoteLink.stop(); } catch (error) { /* not running */ }
       startRemote();
   // once per install: leave a single "PromedPara Caisse" shortcut on the desktop (older installs created copies)
-  const tidyMark = path.join(DATA_DIR, 'bureau-range-1.txt');
+  const tidyMark = path.join(DATA_DIR, 'bureau-range-2.txt');
   if (process.env.PROMEDPARA_EXE && !fs.existsSync(tidyMark)) {
     require('./desktop').tidy(process.env.PROMEDPARA_EXE).then(result => {
       if (!result.ok) return;
@@ -646,6 +646,17 @@ async function api(request, response, url) {
     pinFailures = [];
     if (needsPhoneApproval(match, request)) return startApproval(match, response);
     return send(response, 200, { user: userSafe(match) }, createSession(match));
+  }
+  const renameMatch = route.match(/^\/api\/team\/([^/]+)\/rename$/);
+  if (renameMatch && request.method === 'POST') {
+    const actor = requireOwner(request), b = await readBody(request), name = clean(b.name, 90);
+    if (!isAdmin(actor.id)) throw new HttpError(403, 'Seul l’administrateur peut renommer un compte.');
+    const user = db.prepare('SELECT id,name,role,active FROM users WHERE id=?').get(clean(decodeURIComponent(renameMatch[1]), 100));
+    if (!user || !user.active || user.role !== 'cashier') throw new HttpError(404, 'Compte employé introuvable.');
+    if (name.length < 2) throw new HttpError(400, 'Entrez un nom de 2 caractères au moins.');
+    db.prepare('UPDATE users SET name=? WHERE id=?').run(name, user.id);
+    createNotification('Compte renommé', user.name + ' devient ' + name + ' · par ' + actor.name, 'security');
+    return send(response, 200, { ok: true, name });
   }
   const pinMatch = route.match(/^\/api\/team\/([^/]+)\/pin$/);
   if (pinMatch && request.method === 'POST') {

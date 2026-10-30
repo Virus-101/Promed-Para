@@ -1,36 +1,51 @@
 'use strict';
-// Draws the PromedPara icon (green rounded square, white 6-spoke star) and writes icon.png + icon.ico into ./assets.
+// Builds the black-and-white till icon (white Promed mark on a black rounded square): assets\icon.png + assets\icon.ico (16..256 px).
+// Small sizes are stored as classic BMP entries (what Windows 7 draws best), 64 px and up as PNG.
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
+const sharp = require('sharp');
 
-const N = 256, pixels = Buffer.alloc(N * N * 4);
-const cx = N / 2, cy = N / 2, radius = 52, half = 11;
-const dist = (x, y, a) => Math.abs(-(x - cx) * Math.sin(a) + (y - cy) * Math.cos(a));
-const along = (x, y, a) => Math.abs((x - cx) * Math.cos(a) + (y - cy) * Math.sin(a));
-for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-  const i = (y * N + x) * 4;
-  const dx = Math.max(Math.abs(x - cx) - (N / 2 - radius), 0), dy = Math.max(Math.abs(y - cy) - (N / 2 - radius), 0);
-  const inside = Math.sqrt(dx * dx + dy * dy) <= radius ? 1 : Math.max(0, 1 - (Math.sqrt(dx * dx + dy * dy) - radius));
-  let star = 0;
-  for (let k = 0; k < 3; k++) {
-    const a = k * Math.PI / 3 + Math.PI / 2;
-    if (along(x, y, a) < 84) star = Math.max(star, Math.min(1, Math.max(0, half + 0.5 - dist(x, y, a))));
-  }
-  const g = [29, 107, 70], w = [255, 255, 255];
-  for (let c = 0; c < 3; c++) pixels[i + c] = Math.round(g[c] * (1 - star) + w[c] * star);
-  pixels[i + 3] = Math.round(255 * inside);
+const MARK = path.resolve(__dirname, '..', 'owner-android', 'res', 'drawable-nodpi', 'logo_mark_light.png');
+const OUT = path.join(__dirname, 'assets');
+
+async function render(size) {
+  const radius = Math.round(size * 0.22);
+  const background = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '"><rect width="' + size + '" height="' + size + '" rx="' + radius + '" fill="#000000"/></svg>');
+  const markSize = Math.round(size * 0.68);
+  const mark = await sharp(MARK).resize(markSize, markSize, { fit: 'inside', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer();
+  return sharp(background).composite([{ input: mark, gravity: 'center' }]).png().toBuffer();
 }
-const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
-const crc = buf => { let c = 0xFFFFFFFF; for (const b of buf) c = crcTable[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
-const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const body = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(body)); return Buffer.concat([len, body, c]); };
-const raw = Buffer.alloc((N * 4 + 1) * N);
-for (let y = 0; y < N; y++) { raw[y * (N * 4 + 1)] = 0; pixels.copy(raw, y * (N * 4 + 1) + 1, y * N * 4, (y + 1) * N * 4); }
-const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(N, 0); ihdr.writeUInt32BE(N, 4); ihdr[8] = 8; ihdr[9] = 6;
-const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
-const dir = path.join(__dirname, 'assets'); fs.mkdirSync(dir, { recursive: true });
-fs.writeFileSync(path.join(dir, 'icon.png'), png);
-const head = Buffer.alloc(22); head.writeUInt16LE(0, 0); head.writeUInt16LE(1, 2); head.writeUInt16LE(1, 4);
-head[6] = 0; head[7] = 0; head.writeUInt16LE(1, 10); head.writeUInt16LE(32, 12); head.writeUInt32LE(png.length, 14); head.writeUInt32LE(22, 18);
-fs.writeFileSync(path.join(dir, 'icon.ico'), Buffer.concat([head, png]));
-console.log('icon written', png.length, 'bytes');
+
+async function bmpEntry(png, size) {
+  const { data } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const header = Buffer.alloc(40);
+  header.writeUInt32LE(40, 0); header.writeInt32LE(size, 4); header.writeInt32LE(size * 2, 8); header.writeUInt16LE(1, 12); header.writeUInt16LE(32, 14);
+  header.writeUInt32LE(size * size * 4, 20);
+  const pixels = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const from = ((size - 1 - y) * size + x) * 4, to = (y * size + x) * 4;   // bottom-up rows, BGRA
+    pixels[to] = data[from + 2]; pixels[to + 1] = data[from + 1]; pixels[to + 2] = data[from]; pixels[to + 3] = data[from + 3];
+  }
+  const maskRow = Math.ceil(size / 32) * 4;
+  return Buffer.concat([header, pixels, Buffer.alloc(maskRow * size)]);
+}
+
+(async () => {
+  const sizes = [16, 24, 32, 48, 64, 128, 256], entries = [];
+  for (const size of sizes) {
+    const png = await render(size);
+    entries.push({ size, data: size >= 64 ? png : await bmpEntry(png, size) });
+    if (size === 256) fs.writeFileSync(path.join(OUT, 'icon.png'), png);
+  }
+  const head = Buffer.alloc(6 + entries.length * 16);
+  head.writeUInt16LE(0, 0); head.writeUInt16LE(1, 2); head.writeUInt16LE(entries.length, 4);
+  let offset = head.length;
+  entries.forEach((entry, i) => {
+    const at = 6 + i * 16;
+    head[at] = entry.size >= 256 ? 0 : entry.size; head[at + 1] = entry.size >= 256 ? 0 : entry.size;
+    head.writeUInt16LE(1, at + 4); head.writeUInt16LE(32, at + 6); head.writeUInt32LE(entry.data.length, at + 8); head.writeUInt32LE(offset, at + 12);
+    offset += entry.data.length;
+  });
+  fs.writeFileSync(path.join(OUT, 'icon.ico'), Buffer.concat([head].concat(entries.map(e => e.data))));
+  console.log('icon.ico and icon.png written (' + entries.length + ' sizes)');
+})().catch(error => { console.error(error); process.exit(1); });

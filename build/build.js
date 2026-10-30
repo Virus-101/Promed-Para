@@ -96,6 +96,7 @@ fs.mkdirSync(shellDir, { recursive: true });
 for (const f of ['main.js', 'preload.js', 'package.json', 'updater.js', 'remember.js']) fs.copyFileSync(path.join(__dirname, 'electron', f), path.join(shellDir, f));
 for (const f of ['updater-core.js', 'apply-update.js']) fs.copyFileSync(path.join(__dirname, f), path.join(shellDir, f));
 fs.copyFileSync(path.join(__dirname, 'assets', 'icon.png'), path.join(shellDir, 'icon.png'));
+fs.copyFileSync(path.join(__dirname, 'assets', 'icon.ico'), path.join(shellDir, 'icon.ico'));   // shortcuts point here, and an update can replace it
 copyDir(path.join(__dirname, 'assets'), path.join(OUT, 'assets'));
 
 // 5. Scripts, guides and Android sources.
