@@ -75,7 +75,7 @@ function renderLogin(){
   if(state.loginMode==='pin')setTimeout(()=>document.querySelector('#pin-code')?.focus(),30);
   if(state.loginMode==='qr')startQrLogin();
 }
-const navItems = user => user.role==='owner' ? [['dashboard','layout-dashboard','Vue d’ensemble'],['stock','package','Stock & produits'],['suppliers','truck','Fournisseurs'],['sales','receipt','Ventes'],['team','users','Comptes équipe'],['devices','printer','Matériel'],['shop-settings','store','Boutique en ligne']] : [['pos','shopping-cart','Caisse'],...(user.canReceiveStock?[['receive','package-check','Réception stock']]:[]),...(user.canAddProducts?[['add-products','package-plus','Nouveau produit']]:[])];
+const navItems = user => user.role==='owner' ? [['dashboard','layout-dashboard','Vue d’ensemble'],['stock','package','Stock & produits'],['suppliers','truck','Fournisseurs'],['sales','receipt','Ventes'],['team','users','Comptes équipe'],['devices','printer','Matériel'],['shop-settings','store','Boutique en ligne']] : [['pos','shopping-cart','Caisse'],['learn','scan-barcode','Codes-barres'],...(user.canReceiveStock?[['receive','package-check','Réception stock']]:[]),...(user.canAddProducts?[['add-products','package-plus','Nouveau produit']]:[])];
 // In-app dialogs. Electron has no window.prompt, so questions are asked with real modals that return a promise.
 let dialogResolve=null;
 function resolveDialogs(value){const r=dialogResolve;dialogResolve=null;if(r)r(value);}
@@ -86,6 +86,7 @@ async function openView(view){
   if(state.user&&state.user.mustSetPin&&state.modal!=='recovery-key')state.modal='set-pin';
   try{
     if(view==='pos'&&state.user.role==='cashier'){refreshShift();refreshUpdate();}
+    if(view==='learn'){state.products=(await api('/api/products')).products;state.learn={recent:[],pendingCode:'',query:'',status:null};}
     if(view==='pos'){const data=await api('/api/products');state.products=data.products;state.devices=(await api('/api/device-status'));if(!state.cart.length){try{const saved=JSON.parse(localStorage.getItem('pp-pos-cart-v2')||'[]');state.cart=saved.filter(line=>state.products.some(p=>p.id===line.productId));}catch{state.cart=[];}}}
     if(view==='receive'){state.products=(await api('/api/products')).products;state.suppliers=(await api('/api/suppliers')).suppliers;}
     if(view==='add-products')state.products=(await api('/api/products')).products;
@@ -107,12 +108,14 @@ async function openView(view){
 const WHATSAPP_GROUP='https://chat.whatsapp.com/KOZ4ap2ej6aAtJegH4o3IC?s=cl&p=i&mlu=4&ilr=4&iam=2';
 const pageHead=(label,title,description,action='')=>`<div class="page-head"><div><div class="eyebrow">${label}</div><h1>${title}</h1><p>${description}</p></div>${action}</div>`;
 function renderApp(){
-  if(state.user.role==='cashier'&&state.view!=='pos'&&!(state.view==='receive'&&state.user.canReceiveStock)&&!(state.view==='add-products'&&state.user.canAddProducts)){state.view='pos';}
+  if(state.user.role==='cashier'&&state.view!=='pos'&&state.view!=='learn'&&!(state.view==='receive'&&state.user.canReceiveStock)&&!(state.view==='add-products'&&state.user.canAddProducts)){state.view='pos';}
   const items=navItems(state.user);
-  const content=state.view==='pos'?renderPos():state.view==='receive'?renderReceiveView():state.view==='add-products'?renderAddProductsView():state.view==='dashboard'?renderDashboard():state.view==='stock'?renderStock():state.view==='suppliers'?renderSuppliers():state.view==='sales'?renderSales():state.view==='team'?renderTeam():state.view==='shop-settings'?renderShopSettings():renderDevices();
+  const content=state.view==='learn'?renderLearn():state.view==='pos'?renderPos():state.view==='receive'?renderReceiveView():state.view==='add-products'?renderAddProductsView():state.view==='dashboard'?renderDashboard():state.view==='stock'?renderStock():state.view==='suppliers'?renderSuppliers():state.view==='sales'?renderSales():state.view==='team'?renderTeam():state.view==='shop-settings'?renderShopSettings():renderDevices();
   const keepScannerFocus=document.activeElement?.id==='scanner';
   const consoleClass=state.user.role==='owner'?'owner-console':'cashier-workstation';
-  app.innerHTML=`<div class="app-shell ${consoleClass}"><aside class="rail"><div class="brand-compact">${logo}</div><div class="rail-label">${state.user.role==='owner'?'ESPACE PROPRIÉTAIRE':'ESPACE CAISSE'}</div><nav class="nav">${items.map(([id,icon,label])=>`<button class="${state.view===id?'active':''}" data-view="${id}"><span class="nav-icon">${ico(icon,20)}</span><span class="nav-label">${label}</span></button>`).join('')}<a href="${WHATSAPP_GROUP}" target="_blank" rel="noreferrer"><span class="nav-icon">${ico('message-circle',20)}</span><span class="nav-label">Groupe WhatsApp</span></a>${state.user.role==='owner'?`<a href="/shop" target="_blank" rel="noreferrer"><span class="nav-icon">${ico('globe',20)}</span><span class="nav-label">Boutique publique</span></a>`:''}</nav><div class="rail-bottom"><div class="user-chip">${state.user.role==='cashier'?'<button type="button" class="user-open" data-action="profile" title="Mon profil">':''}<span class="avatar">${esc(state.user.name.split(/\s+/).map(s=>s[0]).slice(0,2).join('').toUpperCase())}</span><span><strong>${esc(state.user.name)}</strong><small>${state.user.role==='owner'?'Propriétaire':'Mon profil'}${state.version?' · v'+esc(state.version):''}</small></span>${state.user.role==='cashier'?'</button>':''}<button data-action="logout" title="Déconnexion" aria-label="Déconnexion">${ico('log-out',18)}</button></div></div></aside><section class="main"><header class="topbar"><div class="crumb">PromedPara <b>/ ${esc(state.view==='pos'?'Caisse':state.view==='receive'?'Réception stock':state.view==='add-products'?'Nouveau produit':state.view==='dashboard'?'Vue d’ensemble':state.view==='stock'?'Stock & produits':state.view==='suppliers'?'Fournisseurs':state.view==='sales'?'Ventes':state.view==='team'?'Comptes équipe':state.view==='shop-settings'?'Boutique en ligne':'Matériel')}</b></div><div class="top-actions"><span class="connection"><i class="status-dot"></i>Service local actif</span>${state.user.role==='owner'?((state.user.phones||[]).length?button(ico('circle-check',16)+' Téléphone connecté','phone-wizard','secondary'):button(ico('smartphone',16)+' Connecter mon téléphone','phone-wizard','primary')):''}${state.user.role==='owner'?button(ico('lock-keyhole',16)+' Mon code','change-my-pin','secondary'):''}${button('Déconnexion','logout','secondary')}</div></header><main class="content">${content}</main></section>${state.modal?renderModal():''}</div>`;
+  app.innerHTML=`<div class="app-shell ${consoleClass}"><aside class="rail"><div class="brand-compact">${logo}</div><div class="rail-label">${state.user.role==='owner'?'ESPACE PROPRIÉTAIRE':'ESPACE CAISSE'}</div><nav class="nav">${items.map(([id,icon,label])=>`<button class="${state.view===id?'active':''}" data-view="${id}"><span class="nav-icon">${ico(icon,20)}</span><span class="nav-label">${label}</span></button>`).join('')}<a href="${WHATSAPP_GROUP}" target="_blank" rel="noreferrer"><span class="nav-icon">${ico('message-circle',20)}</span><span class="nav-label">Groupe WhatsApp</span></a>${state.user.role==='owner'?`<a href="/shop" target="_blank" rel="noreferrer"><span class="nav-icon">${ico('globe',20)}</span><span class="nav-label">Boutique publique</span></a>`:''}</nav><div class="rail-bottom"><div class="user-chip">${state.user.role==='cashier'?'<button type="button" class="user-open" data-action="profile" title="Mon profil">':''}<span class="avatar">${esc(state.user.name.split(/\s+/).map(s=>s[0]).slice(0,2).join('').toUpperCase())}</span><span><strong>${esc(state.user.name)}</strong><small>${state.user.role==='owner'?'Propriétaire':'Mon profil'}${state.version?' · v'+esc(state.version):''}</small></span>${state.user.role==='cashier'?'</button>':''}<button data-action="logout" title="Déconnexion" aria-label="Déconnexion">${ico('log-out',18)}</button></div></div></aside><section class="main"><header class="topbar"><div class="crumb">PromedPara <b>/ ${esc(state.view==='pos'?'Caisse':state.view==='learn'?'Codes-barres':state.view==='receive'?'Réception stock':state.view==='add-products'?'Nouveau produit':state.view==='dashboard'?'Vue d’ensemble':state.view==='stock'?'Stock & produits':state.view==='suppliers'?'Fournisseurs':state.view==='sales'?'Ventes':state.view==='team'?'Comptes équipe':state.view==='shop-settings'?'Boutique en ligne':'Matériel')}</b></div><div class="top-actions"><span class="connection"><i class="status-dot"></i>Service local actif</span>${state.user.role==='owner'?((state.user.phones||[]).length?button(ico('circle-check',16)+' Téléphone connecté','phone-wizard','secondary'):button(ico('smartphone',16)+' Connecter mon téléphone','phone-wizard','primary')):''}${state.user.role==='owner'?button(ico('lock-keyhole',16)+' Mon code','change-my-pin','secondary'):''}${button('Déconnexion','logout','secondary')}</div></header><main class="content">${content}</main></section>${state.modal?renderModal():''}</div>`;
+  if(state.view==='pos'&&state.focusLearn){state.focusLearn=false;setTimeout(()=>document.querySelector('#learn-scan')?.focus(),30);}
+  if(state.view==='learn')setTimeout(()=>document.querySelector(state.learn&&state.learn.pendingCode?'#learn-name':'#learn-main')?.focus(),30);
   if(state.view==='pos'&&keepScannerFocus)setTimeout(()=>document.querySelector('#scanner')?.focus(),0);
 }
 function workerUpdateBanner(){
@@ -144,7 +147,7 @@ function renderPos(){
   const total=lines.reduce((sum,line)=>sum+Math.round(line.product.price_cents*line.qty),0);
   const cartHtml=lines.length?lines.map(line=>`<div class="ticket-line"><div><strong>${esc(line.product.name)}</strong><small>${esc(line.product.sku)} · ${money(line.product.price_cents)} / ${esc(line.product.unit)}</small></div><div class="line-end"><div class="line-total">${money(Math.round(line.qty*line.product.price_cents))}</div><div class="stepper"><button data-action="qty" data-id="${esc(line.productId)}" data-delta="-1" aria-label="Réduire">−</button><span>${number(line.qty)}</span><button data-action="qty" data-id="${esc(line.productId)}" data-delta="1" aria-label="Ajouter">+</button></div></div></div>`).join(''):`<div class="ticket-empty">Le ticket est vide.<br>Scannez un code-barres ou touchez un produit.</div>`;
   const action=button(`${ico('check',18)} Encaisser · ${money(total)}`,'checkout','primary checkout',lines.length?'':'disabled');
-  return `${workerUpdateBanner()}${pageHead('VENTE AU COMPTOIR','Nouvelle vente','Scannez un produit avec le lecteur SUNLUX ou touchez sa carte.',button(ico('trash-2',16)+' Vider le ticket','clear-cart','secondary',lines.length?'':'disabled'))}${state.lastSale?`<div class="banner-success"><div><strong>Vente ${esc(state.lastSale.number)} enregistrée</strong><span>${money(state.lastSale.totalCents)} · Stock mis à jour</span></div><div>${button(ico('printer',16)+' Imprimer le reçu','print-last','primary')}${button(ico('plus',16)+' Nouvelle vente','dismiss-sale','secondary')}</div></div>`:''}<div class="pos-layout"><section class="panel catalog-panel"><div class="panel-head"><div><h2>Catalogue produits</h2><p>${state.products.length?`${state.products.length} produits disponibles`: 'Importez le fichier produits depuis le compte propriétaire.'}</p></div>${searching?`<span class="count-pill">${products.length} résultats${products.length>80?' · 80 affichés':''}</span>`:''}</div><div class="scan-search"><label class="scan-wrap"><span class="scan-symbol">${ico('scan-barcode',22)}</span><input id="scanner" autocomplete="off" placeholder="Touchez ici puis scannez le code-barres" aria-label="Code-barres"><span class="scan-state">Lecteur prêt</span></label><input id="search" class="search-input" placeholder="Rechercher un nom ou une référence" value="${esc(state.query)}"></div>${searching?`<div class="cat-row">${categories.map(c=>`<button class="cat-button ${state.category===c?'active':''}" data-category="${esc(c)}">${esc(c)}</button>`).join('')}</div>`:''}<div class="product-grid">${visibleProducts.map(productButton).join('')||`<div class="empty">${!state.products.length?'Le catalogue est vide. Le propriétaire pourra importer votre fichier de stock.':searching?'Aucun résultat.':'Scannez un code-barres ou tapez le nom du produit : il apparaîtra ici.'}</div>`}</div></section><aside class="panel ticket"><div class="ticket-head"><div><h2>Ticket client</h2><small>${lines.length} ligne${lines.length===1?'':'s'} · En cours</small></div><span class="ticket-no">${new Date().getFullYear()}-${String(Date.now()).slice(-5)}</span></div><div class="ticket-lines">${cartHtml}</div><div class="ticket-summary"><div class="sum-row"><span>Sous-total</span><b>${money(total)}</b></div><div class="pay-choice">${['Espèces','Carte','Autre'].map(p=>`<button class="${state.payment===p?'active':''}" data-payment="${p}">${p}</button>`).join('')}</div>${state.payment==='Espèces'?`<div class="cash-field visible"><label for="cash-received">Montant reçu (MAD)</label><input id="cash-received" type="number" min="${money(total)}" step="0.01" value="${esc(state.cashReceived||money(total))}"></div>`:''}<div class="sum-row total"><span>TOTAL À PAYER</span><strong>${money(total)}</strong></div>${action}<div class="checkout-hint">SUNLUX · lecteur USB en mode clavier</div></div></aside></div>`;
+  return `${workerUpdateBanner()}${pageHead('VENTE AU COMPTOIR','Nouvelle vente','Scannez un produit avec le lecteur SUNLUX ou touchez sa carte.',button(ico('trash-2',16)+' Vider le ticket','clear-cart','secondary',lines.length?'':'disabled'))}${state.lastSale?`<div class="banner-success"><div><strong>Vente ${esc(state.lastSale.number)} enregistrée</strong><span>${money(state.lastSale.totalCents)} · Stock mis à jour</span></div><div>${button(ico('printer',16)+' Imprimer le reçu','print-last','primary')}${button(ico('plus',16)+' Nouvelle vente','dismiss-sale','secondary')}</div></div>`:''}<div class="pos-layout"><section class="panel catalog-panel"><div class="panel-head"><div><h2>Catalogue produits</h2><p>${state.products.length?`${state.products.length} produits disponibles`: 'Importez le fichier produits depuis le compte propriétaire.'}</p></div>${searching?`<span class="count-pill">${products.length} résultats${products.length>80?' · 80 affichés':''}</span>`:''}</div><div class="scan-search"><label class="scan-wrap"><span class="scan-symbol">${ico('scan-barcode',22)}</span><input id="scanner" autocomplete="off" placeholder="Touchez ici puis scannez le code-barres" aria-label="Code-barres"><span class="scan-state">Lecteur prêt</span></label><input id="search" class="search-input" placeholder="Rechercher un nom ou une référence" value="${esc(state.query)}"></div>${searching?`<div class="cat-row">${categories.map(c=>`<button class="cat-button ${state.category===c?'active':''}" data-category="${esc(c)}">${esc(c)}</button>`).join('')}</div>`:''}<div class="product-grid">${visibleProducts.map(productButton).join('')||`<div class="empty">${!state.products.length?'Le catalogue est vide. Le propriétaire pourra importer votre fichier de stock.':searching?'Aucun résultat.':'Scannez un code-barres ou tapez le nom du produit : il apparaîtra ici.'}</div>`}</div></section><aside class="panel ticket"><div class="ticket-head"><div><h2>Ticket client</h2><small>${lines.length} ligne${lines.length===1?'':'s'} · En cours</small></div><span class="ticket-no">${new Date().getFullYear()}-${String(Date.now()).slice(-5)}</span></div><div class="ticket-lines">${cartHtml}</div><div class="ticket-summary"><div class="sum-row"><span>Sous-total</span><b>${money(total)}</b></div><div class="pay-choice">${['Espèces','Carte','Autre'].map(p=>`<button class="${state.payment===p?'active':''}" data-payment="${p}">${p}</button>`).join('')}</div>${state.payment==='Espèces'?`<div class="cash-field visible"><label for="cash-received">Montant reçu (MAD)</label><input id="cash-received" type="number" min="${money(total)}" step="0.01" value="${esc(state.cashReceived||money(total))}"></div>`:''}<div class="sum-row total"><span>TOTAL À PAYER</span><strong>${money(total)}</strong></div>${learnBox(lines)}${action}<div class="checkout-hint">SUNLUX · lecteur USB en mode clavier</div></div></aside></div>`;
 }
 function renderDashboard(){
   const d=state.overview||{salesCount:0,revenueCents:0,lowStock:[],recent:[],notifications:[],productCount:0};
@@ -216,6 +219,38 @@ function logicaModal(){
   const j=state.logica||{running:true};
   const body=j.running?'<p class="wizard-wait"><span class="spinner"></span> Recherche de Logica sur ce PC… (jusqu’à une minute)</p>':j.error?'<p class="wizard-error">'+esc(j.error)+'</p>':'<p class="hint">Voici ce que la caisse a trouvé. Le rapport est aussi enregistré dans le dossier des données (rapport-ancien-logiciel.txt).</p><pre class="logica-report" style="max-height:46vh;overflow:auto;white-space:pre-wrap;font-size:12px;background:#f3f5f1;border-radius:10px;padding:12px">'+esc(j.text||'')+'</pre>';
   return '<div class="modal-backdrop"><section class="modal legacy-check-modal" data-modal="true"><header class="modal-head"><div><h2>Base de données de Logica</h2><p>Recherche en lecture seule</p></div><button class="modal-x" data-action="close-modal">'+ico('x',20)+'</button></header><div class="legacy-check-body">'+body+'</div><footer class="modal-foot">'+(j.running?'':'<button class="button secondary" data-action="logica-copy">Copier le rapport</button>')+'<button class="button primary" data-action="close-modal">Fermer</button></footer></section></div>';
+}
+// a product picked by name has no code yet: the next scan teaches it
+function pendingLearnProduct(){
+  const skipped=state.learnSkipped||{};
+  const lines=state.cart.map(l=>state.products.find(p=>p.id===l.productId)).filter(p=>p&&!p.barcode&&!skipped[p.id]);
+  return lines.length?lines[lines.length-1]:null;
+}
+function learnBox(){
+  const p=pendingLearnProduct();
+  if(!p)return '';
+  return '<div class="learn-barcode"><label for="learn-scan">Scannez le code-barres de « '+esc(p.name)+' » pour l’enregistrer</label><div class="learn-row"><input id="learn-scan" autocomplete="off" placeholder="Scanner ici…"><button type="button" class="button secondary" data-action="learn-skip" data-id="'+esc(p.id)+'">Passer</button></div></div>';
+}
+async function linkBarcode(code,productId){
+  const r=await api('/api/barcode-link',{method:'POST',body:JSON.stringify({code,productId})});
+  const p=state.products.find(x=>x.id===r.product.id);if(p)p.barcode=r.product.barcode;
+  return r.product;
+}
+function learnResults(){
+  const l=state.learn||{},q=String(l.query||'').toLocaleLowerCase('fr').trim();
+  if(!q)return '<p class="hint">Tapez le nom du produit : la liste se filtre.</p>';
+  const list=state.products.filter(p=>!p.barcode&&(p.name+' '+(p.category||'')).toLocaleLowerCase('fr').includes(q)).slice(0,8);
+  if(!list.length)return '<p class="hint">Aucun produit sans code ne correspond. Vérifiez l’orthographe.</p>';
+  return list.map(p=>'<button type="button" class="button secondary wide barcode-pick" data-action="learn-pick" data-id="'+esc(p.id)+'" style="justify-content:space-between;text-align:left"><span>'+esc(p.name)+'</span><small>'+money(p.price_cents)+'</small></button>').join('');
+}
+function renderLearn(){
+  const l=state.learn||{recent:[],pendingCode:'',query:'',status:null};
+  const total=state.products.length,done=state.products.filter(p=>p.barcode).length,pct=total?Math.round(done*100/total):0;
+  const status=l.status?'<p class="learn-status '+l.status.kind+'">'+esc(l.status.text)+'</p>':'';
+  const pending=l.pendingCode?'<div class="learn-pending"><p><b>Produit introuvable</b> pour le code <b>'+esc(l.pendingCode)+'</b>.</p><p>Tapez le nom du produit, puis choisissez-le dans la liste :</p><div class="field"><input id="learn-name" autocomplete="off" placeholder="Nom du produit" value="'+esc(l.query||'')+'"></div><div id="learn-results" style="display:grid;gap:8px;margin-top:10px">'+learnResults()+'</div><button type="button" class="button secondary" data-action="learn-cancel" style="margin-top:12px">Ignorer ce code</button></div>':'<div class="field"><label for="learn-main">Scannez un produit</label><input id="learn-main" autocomplete="off" placeholder="Scanner ici…"></div>';
+  const recent=(l.recent||[]).map(r=>'<li><b>'+esc(r.name)+'</b><small>'+esc(r.code)+'</small></li>').join('');
+  return pageHead('CODES-BARRES','Enregistrer les codes-barres','Quand il n’y a pas de client : scannez les produits un par un. Un code inconnu vous demande le nom du produit à choisir dans la liste.','')
+    +'<section class="panel section-panel"><h2 class="section-title">'+done+' produits sur '+total+' ont un code-barres</h2><div class="learn-bar"><i style="width:'+pct+'%"></i></div>'+status+pending+(recent?'<h3 class="section-title" style="margin-top:20px">Enregistrés pendant cette séance</h3><ul class="learn-recent">'+recent+'</ul>':'')+'</section>';
 }
 function openBarcodeCapture(product){state.barcodeCapture={id:product.id,name:product.name};state.modal='barcode-capture';renderApp();setTimeout(()=>{const box=document.querySelector('#barcode-capture');if(box)box.focus();},80);}
 function barcodeCaptureModal(){
@@ -432,7 +467,7 @@ document.addEventListener('submit',async event=>{
 document.addEventListener('click',async event=>{
   const viewButton=event.target.closest('[data-view]');if(viewButton){await openView(viewButton.dataset.view);return;}
   const category=event.target.closest('[data-category]');if(category){state.category=category.dataset.category;renderApp();return;}
-  const product=event.target.closest('[data-product]');if(product){const picked=state.products.find(p=>p.id===product.dataset.product);addToCart(product.dataset.product);if(picked&&!picked.barcode&&!(state.askedBarcode||{})[picked.id]){state.askedBarcode=state.askedBarcode||{};state.askedBarcode[picked.id]=true;openBarcodeCapture(picked);}return;}
+  const product=event.target.closest('[data-product]');if(product){const picked=state.products.find(p=>p.id===product.dataset.product);addToCart(product.dataset.product);if(picked&&!picked.barcode){state.learnSkipped=state.learnSkipped||{};delete state.learnSkipped[picked.id];state.focusLearn=true;renderApp();}return;}
   const pay=event.target.closest('[data-payment]');if(pay){state.payment=pay.dataset.payment;renderApp();return;}
   const actionButton=event.target.closest('[data-action]');if(event.target.closest('[data-modal]')&&actionButton?.classList.contains('modal-backdrop'))return;
   const action=actionButton?.dataset.action;if(!action)return;
@@ -555,6 +590,13 @@ else if(action==='remembered-login'){
     if(state.modal==='logica-scan')renderApp();
   }
   else if(action==='logica-copy'){try{await navigator.clipboard.writeText((state.logica&&state.logica.text)||'');toast('Rapport copié.');}catch(e){toast('Copie impossible : photographiez l’écran.');}}
+  else if(action==='learn-skip'){state.learnSkipped=state.learnSkipped||{};state.learnSkipped[actionButton.dataset.id]=true;renderApp();setTimeout(()=>document.querySelector('#scanner')?.focus(),40);}
+  else if(action==='learn-cancel'){state.learn.pendingCode='';state.learn.query='';state.learn.status={kind:'warn',text:'Code ignoré.'};renderApp();}
+  else if(action==='learn-pick'){
+    try{const code=state.learn.pendingCode,product=await linkBarcode(code,actionButton.dataset.id);
+      state.learn.recent.unshift({name:product.name,code});state.learn.recent=state.learn.recent.slice(0,10);state.learn.pendingCode='';state.learn.query='';state.learn.status={kind:'ok',text:'Enregistré : '+product.name};renderApp();
+    }catch(error){toast(error.message);}
+  }
   else if(action==='barcode-pick'){
     try{const r=await api('/api/barcode-link',{method:'POST',body:JSON.stringify({code:state.barcodeLink.code,productId:actionButton.dataset.id})});
       const p=state.products.find(x=>x.id===r.product.id);if(p)p.barcode=r.product.barcode;state.modal='';state.unknownScans=(state.unknownScans||[]).filter(c=>c.code!==r.product.barcode);renderApp();toast('Code associé à « '+r.product.name+' ».');if(p&&state.view==='pos')addToCart(p.id);
@@ -642,6 +684,7 @@ document.addEventListener('change',event=>{
   if(action==='confirm-import-review'){preview.confirmed=event.target.checked;renderApp();}
 });
 document.addEventListener('input',event=>{
+  if(event.target.id==='learn-name'&&state.learn){state.learn.query=event.target.value;const box=document.querySelector('#learn-results');if(box)box.innerHTML=learnResults();return;}
   if(event.target.matches&&event.target.matches('[data-barcode-search]')){state.barcodeLink.query=event.target.value;const box=document.querySelector('#barcode-results');if(box)box.innerHTML=barcodeResults();return;}
   if(event.target.id==='rk'){const raw=event.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,16);event.target.value=raw.replace(/(.{4})(?=.)/g,'$1-');}
   if(event.target.id==='search'){state.query=event.target.value;clearTimeout(state.searchTimer);state.searchTimer=setTimeout(()=>{const old=document.querySelector('#search'),cursor=old?old.selectionStart:0;renderApp();const input=document.querySelector('#search');input?.focus();input?.setSelectionRange(cursor,cursor);},130);}
@@ -656,6 +699,21 @@ document.addEventListener('change',async event=>{
   }
 });
 document.addEventListener('keydown',async event=>{
+  if(event.target.id==='learn-scan'&&event.key==='Enter'){
+    event.preventDefault();const code=event.target.value.trim();event.target.value='';if(!code)return;
+    const owner=state.products.find(p=>p.barcode===code);
+    if(owner){toast('Ce code appartient déjà à « '+owner.name+' ».');return;}
+    const target=pendingLearnProduct();if(!target)return;
+    try{await linkBarcode(code,target.id);toast('Code enregistré pour « '+target.name+' ».');}catch(error){toast(error.message);}
+    state.focusLearn=Boolean(pendingLearnProduct());renderApp();if(!state.focusLearn)setTimeout(()=>document.querySelector('#scanner')?.focus(),40);
+    return;
+  }
+  if(event.target.id==='learn-main'&&event.key==='Enter'){
+    event.preventDefault();const code=event.target.value.trim();event.target.value='';if(!code)return;
+    const known=state.products.find(p=>p.barcode===code);
+    if(known){state.learn.status={kind:'ok',text:'Déjà enregistré : '+known.name};renderApp();return;}
+    state.learn.pendingCode=code;state.learn.query='';state.learn.status=null;renderApp();return;
+  }
   if(event.target.id==='barcode-capture'&&event.key==='Enter'){
     event.preventDefault();const code=event.target.value.trim();if(!code)return;
     try{const r=await api('/api/barcode-link',{method:'POST',body:JSON.stringify({code,productId:state.barcodeCapture.id})});const p=state.products.find(x=>x.id===r.product.id);if(p)p.barcode=r.product.barcode;state.modal='';renderApp();toast('Code enregistré : le prochain scan sera direct.');}

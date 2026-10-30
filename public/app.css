@@ -110,3 +110,14 @@ html[data-theme="dark"] .scan-wrap,html[data-theme="dark"] .ticket-no,html[data-
 html[data-theme="dark"] .ticket-summary *,html[data-theme="dark"] .scan-wrap *{color:#e5eee8}
 html[data-theme="dark"] .ticket-summary input,html[data-theme="dark"] .scan-wrap input{background:#101a15!important}
 html[data-theme="dark"] .crumb,html[data-theme="dark"] .crumb b{color:#a9b9af!important}
+
+/* teaching the till a product's barcode */
+.learn-barcode{margin:10px 0;padding:10px 12px;border:1.5px dashed #1d6b49;border-radius:12px;background:#eef7f1}
+.learn-barcode label{display:block;font-size:12px;font-weight:700;color:#173d2a;margin-bottom:6px}
+.learn-row{display:flex;gap:8px}.learn-row input{flex:1;min-width:0;padding:10px 12px;border:1px solid #cfe0d4;border-radius:10px}
+.learn-bar{height:10px;border-radius:6px;background:#e4ebe6;overflow:hidden;margin:6px 0 14px}.learn-bar i{display:block;height:100%;background:#1d6b49}
+.learn-status{margin:10px 0;padding:10px 12px;border-radius:10px;font-weight:700}.learn-status.ok{background:#e9f6ee;color:#14543a}.learn-status.warn{background:#fdf6e7;color:#8a5a10}
+.learn-pending{padding:14px;border:1.5px solid #c27a12;border-radius:12px;background:#fdf6e7}
+.learn-recent{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}.learn-recent li{display:flex;justify-content:space-between;gap:12px;padding:8px 10px;border-radius:10px;background:#f1f6f3}
+html[data-theme="dark"] .learn-barcode,html[data-theme="dark"] .learn-pending,html[data-theme="dark"] .learn-recent li{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .learn-barcode label{color:#e5eee8}
