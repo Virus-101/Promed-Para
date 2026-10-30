@@ -91,16 +91,29 @@ function New-Shortcut($folder, $name, $target, $arguments, $icon, $description) 
 }
 if ($useElectron) { $mainTarget = $exe; $mainArgs = '' } else { $mainTarget = $secours; $mainArgs = '"' + (Join-Path $dest 'LANCER-CAISSE.vbs') + '"' }
 $mainIcon = $ico; if (-not (Test-Path -LiteralPath $ico)) { $mainIcon = $null }
-$desktops = @((Get-CommonDesktop), [Environment]::GetFolderPath('Desktop'))
 $made = 0
-foreach ($d in $desktops) {
+$created = ''
+# ONE shortcut on the desktop: the shared desktop first, this user's desktop only if the shared one cannot be written
+foreach ($d in @((Get-CommonDesktop), [Environment]::GetFolderPath('Desktop'))) {
     if (-not $d) { continue }
-    if (New-Shortcut $d 'PromedPara Caisse' $mainTarget $mainArgs $mainIcon 'Ouvrir la caisse PromedPara') { $made++ }
-    if ($useElectron) { [void](New-Shortcut $d 'Test lecteur code-barres' $exe '--page=/scanner-test.html' $mainIcon 'Tester le lecteur SUNLUX') }
-    else { [void](New-Shortcut $d 'Test lecteur code-barres' $secours ('"' + (Join-Path $dest 'TEST-LECTEUR.vbs') + '"') $null 'Tester le lecteur SUNLUX') }
+    if (New-Shortcut $d 'PromedPara Caisse' $mainTarget $mainArgs $mainIcon 'Ouvrir la caisse PromedPara') { $made++; $created = Join-Path $d 'PromedPara Caisse.lnk'; break }
 }
+# copies left by older installs go away (only shortcuts that point at a PromedPara program)
+foreach ($d in @((Get-CommonDesktop), [Environment]::GetFolderPath('Desktop'))) {
+    if (-not $d -or -not (Test-Path -LiteralPath $d)) { continue }
+    foreach ($f in (Get-ChildItem -LiteralPath $d -Filter '*.lnk' -ErrorAction SilentlyContinue)) {
+        if ($f.FullName -eq $created) { continue }
+        if ($f.Name -like 'PromedPara Caisse*' -or $f.Name -like 'Test lecteur code-barres*') {
+            $t = ''; try { $t = [string]$wsh.CreateShortcut($f.FullName).TargetPath } catch { }
+            if ($t -like '*PromedPara.exe' -or $t -like '*wscript*') { try { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction Stop } catch { } }
+        }
+    }
+}
+# the scanner test is kept inside the install folder, not on the desktop
+if ($useElectron) { [void](New-Shortcut $dest 'Test lecteur code-barres' $exe '--page=/scanner-test.html' $mainIcon 'Tester le lecteur SUNLUX') }
+else { [void](New-Shortcut $dest 'Test lecteur code-barres' $secours ('"' + (Join-Path $dest 'TEST-LECTEUR.vbs') + '"') $null 'Tester le lecteur SUNLUX') }
 [void](New-Shortcut $dest 'PromedPara (mode secours Chrome)' $secours ('"' + (Join-Path $dest 'LANCER-CAISSE.vbs') + '"') $null 'A utiliser seulement si l''application ne s''ouvre pas')
-if ($made -gt 0) { Say 'OK : raccourcis "PromedPara Caisse" et "Test lecteur code-barres" sur le bureau' 'Green' } else { Say ('ATTENTION : aucun raccourci cree. Lancez directement : ' + $mainTarget) 'Yellow' }
+if ($made -gt 0) { Say 'OK : un seul raccourci "PromedPara Caisse" sur le bureau' 'Green' } else { Say ('ATTENTION : aucun raccourci cree. Lancez directement : ' + $mainTarget) 'Yellow' }
 if ($true) {   # toujours : la caisse doit se rouvrir toute seule apres une coupure de courant
     if (New-Shortcut (Get-CommonStartup) 'PromedPara Caisse' $mainTarget $mainArgs $mainIcon 'Ouvrir la caisse PromedPara') { Say 'OK : demarrage automatique active' 'Green' }
     else { Say 'ATTENTION : demarrage automatique non active.' 'Yellow' }

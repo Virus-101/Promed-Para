@@ -530,6 +530,15 @@ async function api(request, response, url) {
       cfg.enabled = body.phoneLink; fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
       try { remoteLink.stop(); } catch (error) { /* not running */ }
       startRemote();
+  // once per install: leave a single "PromedPara Caisse" shortcut on the desktop (older installs created copies)
+  const tidyMark = path.join(DATA_DIR, 'bureau-range-1.txt');
+  if (process.env.PROMEDPARA_EXE && !fs.existsSync(tidyMark)) {
+    require('./desktop').tidy(process.env.PROMEDPARA_EXE).then(result => {
+      if (!result.ok) return;
+      fs.writeFileSync(tidyMark, JSON.stringify(result));
+      if (result.removed.length) createNotification('Bureau rangé', result.removed.length + ' raccourci(s) en double retiré(s) : il reste un seul « PromedPara Caisse ».', 'info');
+    }).catch(() => {});
+  }
       createNotification('Sécurité de la caisse', 'Lien internet des téléphones ' + (body.phoneLink ? 'activé' : 'désactivé') + ' · ' + me.name, 'security');
     }
     return send(response, 200, { phoneApproval: security.phoneApproval === true, phones: db.prepare('SELECT COUNT(*) AS n FROM owner_devices WHERE user_id=? AND active=1').get(me.id).n, link: { enabled: remoteLink.enabled, connected: remoteLink.connected }, isAdmin: true });
