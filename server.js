@@ -161,7 +161,7 @@ const uniqueUsername = name => {
 };
 const normRecovery = key => String(key || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const isAdmin = userId => Boolean(accountFlags(userId).is_admin);
-const userSafe = user => { const flags = accountFlags(user.id); return { id: user.id, name: user.name, username: user.username, role: user.role, canReceiveStock: Boolean(user.can_receive_stock), canAddProducts: user.role !== 'owner' && productAccess(user.id), isAdmin: Boolean(flags.is_admin), mustChangePassword: Boolean(flags.must_change_password), hasPin: Boolean(flags.has_pin), mustSetPin: user.role === 'owner' && (Boolean(flags.must_change_password) || !flags.has_pin), phones: user.role === 'owner' ? db.prepare('SELECT id,name,last_seen_at FROM owner_devices WHERE user_id=? AND active=1 ORDER BY created_at DESC').all(user.id) : undefined }; };
+const userSafe = user => { const flags = accountFlags(user.id); return { id: user.id, name: user.name, username: user.username, role: user.role, canReceiveStock: Boolean(user.can_receive_stock), canAddProducts: user.role !== 'owner' && productAccess(user.id), isAdmin: Boolean(flags.is_admin), mustChangePassword: Boolean(flags.must_change_password), hasPin: Boolean(flags.has_pin), mustSetPin: user.role === 'owner' && (Boolean(flags.must_change_password) || !flags.has_pin), strictStock: setting('strict_stock') === '1', phones: user.role === 'owner' ? db.prepare('SELECT id,name,last_seen_at FROM owner_devices WHERE user_id=? AND active=1 ORDER BY created_at DESC').all(user.id) : undefined }; };
 const setting = key => db.prepare('SELECT setting_value FROM business_settings WHERE setting_key=?').get(key)?.setting_value || '';
 const passwordHash = password => {
   const salt = randomBytes(16);
@@ -513,7 +513,7 @@ async function api(request, response, url) {
   }
   if (route === '/api/security' && request.method === 'GET') {
     const me = requireOwner(request), security = loadSecurity();
-    return send(response, 200, { phoneApproval: security.phoneApproval === true, phones: db.prepare('SELECT COUNT(*) AS n FROM owner_devices WHERE user_id=? AND active=1').get(me.id).n, link: { enabled: remoteLink.enabled, connected: remoteLink.connected }, isAdmin: isAdmin(me.id) });
+    return send(response, 200, { phoneApproval: security.phoneApproval === true, strictStock: setting('strict_stock') === '1', phones: db.prepare('SELECT COUNT(*) AS n FROM owner_devices WHERE user_id=? AND active=1').get(me.id).n, link: { enabled: remoteLink.enabled, connected: remoteLink.connected }, isAdmin: isAdmin(me.id) });
   }
   if (route === '/api/security' && request.method === 'POST') {
     const me = requireOwner(request), body = await readBody(request);
@@ -524,6 +524,10 @@ async function api(request, response, url) {
       if (body.phoneApproval && !db.prepare('SELECT 1 AS x FROM owner_devices WHERE user_id=? AND active=1').get(me.id)) throw new HttpError(400, 'Associez d’abord votre téléphone : sinon personne ne pourrait approuver.');
       security.phoneApproval = body.phoneApproval; saveSecurity(security);
       createNotification('Sécurité de la caisse', 'Approbation sur le téléphone ' + (body.phoneApproval ? 'activée' : 'désactivée') + ' · ' + me.name, 'security');
+    }
+    if (typeof body.strictStock === 'boolean') {
+      db.prepare('INSERT INTO business_settings(setting_key,setting_value) VALUES(?,?) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value').run('strict_stock', body.strictStock ? '1' : '0');
+      createNotification('Sécurité de la caisse', 'Vente bloquée quand le stock est à zéro : ' + (body.strictStock ? 'activée' : 'désactivée') + ' · ' + me.name, 'security');
     }
     if (typeof body.phoneLink === 'boolean') {
       const file = path.join(DATA_DIR, 'relay.json'); let cfg = {};
@@ -542,7 +546,7 @@ async function api(request, response, url) {
   }
       createNotification('Sécurité de la caisse', 'Lien internet des téléphones ' + (body.phoneLink ? 'activé' : 'désactivé') + ' · ' + me.name, 'security');
     }
-    return send(response, 200, { phoneApproval: security.phoneApproval === true, phones: db.prepare('SELECT COUNT(*) AS n FROM owner_devices WHERE user_id=? AND active=1').get(me.id).n, link: { enabled: remoteLink.enabled, connected: remoteLink.connected }, isAdmin: true });
+    return send(response, 200, { phoneApproval: security.phoneApproval === true, strictStock: setting('strict_stock') === '1', phones: db.prepare('SELECT COUNT(*) AS n FROM owner_devices WHERE user_id=? AND active=1').get(me.id).n, link: { enabled: remoteLink.enabled, connected: remoteLink.connected }, isAdmin: true });
   }
   if (route === '/api/login' && request.method === 'POST') {
     const body = await readBody(request);
@@ -810,14 +814,18 @@ async function api(request, response, url) {
     const viewer = requireUser(request);
     let status = {};
     try { status = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'update-status.json'), 'utf8')); } catch { /* not written yet */ }
-    if (viewer.role !== 'owner') return send(response, 200, { current: APP_VERSION, staged: status.staged || '' });
+    if (viewer.role !== 'owner') return send(response, 200, { current: APP_VERSION, staged: status.staged || '', lastCheck: status.lastCheck || '', message: status.message || '' });
     return send(response, 200, Object.assign({ enabled: false, current: APP_VERSION, saved: [] }, status, { current: APP_VERSION }));
   }
   if (route === '/api/update/command' && request.method === 'POST') {
     const actor = requireUser(request), body = await readBody(request), action = String(body.action || '');
     if (!['check', 'apply', 'rollback'].includes(action)) throw new HttpError(400, 'Commande inconnue.');
     if (actor.role !== 'owner') {
-      if (action !== 'apply') throw new HttpError(403, 'Réservé au propriétaire.');
+      if (action !== 'apply' && action !== 'check') throw new HttpError(403, 'Réservé au propriétaire.');
+      if (action === 'check') {
+        fs.writeFileSync(path.join(DATA_DIR, 'update-command.json'), JSON.stringify({ action, version: '', by: actor.name, at: isoNow() }));
+        return send(response, 202, { ok: true });
+      }
       let ready = ''; try { ready = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'update-status.json'), 'utf8')).staged || ''; } catch { /* none */ }
       if (!ready) throw new HttpError(409, 'Aucune mise à jour n’est prête.');
     }
@@ -966,6 +974,7 @@ async function api(request, response, url) {
     const payment = ['Espèces','Carte','Autre'].includes(body.payment) ? body.payment : 'Espèces';
     const saleId = id('sale'), createdAt = isoNow();
     let sale;
+    const oversold = [];
     db.exec('BEGIN IMMEDIATE');
     try {
       let totalCents = 0; const requested = new Map();
@@ -977,7 +986,8 @@ async function api(request, response, url) {
         requested.set(product.id,{product,qty:(existing?.qty||0)+qty});
       }
       const snapshots = [...requested.values()].map(({product,qty})=>({product,qty,lineCents:Math.round(product.price_cents*qty)}));
-      for (const snapshot of snapshots) { if (snapshot.product.quantity < snapshot.qty) throw new HttpError(409, `Stock insuffisant : ${snapshot.product.name}.`); totalCents += snapshot.lineCents; }
+      const strictStock = setting('strict_stock') === '1';
+      for (const snapshot of snapshots) { if (strictStock && snapshot.product.quantity < snapshot.qty) throw new HttpError(409, `Stock insuffisant : ${snapshot.product.name}.`); totalCents += snapshot.lineCents; }
       const receivedCents = payment === 'Espèces' ? cents(body.received) : totalCents;
       if (payment === 'Espèces' && receivedCents < totalCents) throw new HttpError(400, 'Le montant reçu est inférieur au total.');
       const nextNumber = Number(db.prepare("SELECT COUNT(*) n FROM sales WHERE substr(created_at,1,4)=strftime('%Y','now')").get().n) + 1;
@@ -985,13 +995,15 @@ async function api(request, response, url) {
       const changeCents = Math.max(0, receivedCents-totalCents);
       db.prepare('INSERT INTO sales(id,number,created_at,total_cents,payment,received_cents,change_cents,cashier_id,cashier_name,note) VALUES(?,?,?,?,?,?,?,?,?,?)').run(saleId,number,createdAt,totalCents,payment,receivedCents,changeCents,user.id,user.name,clean(body.note,250));
       const addLine = db.prepare('INSERT INTO sale_lines(id,sale_id,product_id,name,sku,qty,unit,unit_price_cents,line_total_cents) VALUES(?,?,?,?,?,?,?,?,?)');
-      const updateStock = db.prepare('UPDATE products SET quantity=quantity-?,updated_at=? WHERE id=?');
+      const updateStock = db.prepare('UPDATE products SET quantity=MAX(0,quantity-?),updated_at=? WHERE id=?');
       const addMove = db.prepare('INSERT INTO stock_movements(id,product_id,product_name,kind,quantity_delta,reference,user_id,user_name,created_at) VALUES(?,?,?,?,?,?,?,?,?)');
       for (const snapshot of snapshots) {
         const p = snapshot.product;
         addLine.run(id('line'),saleId,p.id,p.name,p.sku,snapshot.qty,p.unit,p.price_cents,snapshot.lineCents);
+        const available = Math.max(0, Number(p.quantity) || 0), over = Math.max(0, snapshot.qty - available);
+        if (over > 0) oversold.push({ name: p.name, sold: snapshot.qty, available, unit: p.unit });
         updateStock.run(snapshot.qty,createdAt,p.id);
-        addMove.run(id('move'),p.id,p.name,'Vente',-snapshot.qty,number,user.id,user.name,createdAt);
+        addMove.run(id('move'),p.id,p.name,'Vente',-Math.min(snapshot.qty, available),over > 0 ? number + ' (hors stock : ' + over + ')' : number,user.id,user.name,createdAt);
       }
       const lowStockCrossings = snapshots.filter(({product,qty}) => product.quantity > product.reorder_level && product.quantity - qty <= product.reorder_level).map(({product,qty}) => ({name:product.name, quantity:product.quantity-qty, unit:product.unit, threshold:product.reorder_level}));
       sale = { id:saleId, number, createdAt, totalCents, payment, receivedCents, changeCents, cashierName:user.name, lines:snapshots.map(x=>({name:x.product.name,sku:x.product.sku,qty:x.qty,unit:x.product.unit,priceCents:x.product.price_cents,lineTotalCents:x.lineCents})) };
@@ -1001,6 +1013,7 @@ async function api(request, response, url) {
     const items=sale.lines.slice(0,4).map(line=>`${line.qty} ${line.unit} ${line.name}`).join(', ');
     const more=sale.lines.length>4?` · +${sale.lines.length-4} autre(s)`:'';
     createNotification('Nouvelle vente', `${sale.number} · ${money(sale.totalCents)} MAD · ${sale.cashierName} · ${items}${more}`, 'sale');
+    for (const item of oversold) createNotification('Vendu hors stock', `${item.name} · ${item.sold} ${item.unit} vendu(s) alors que le stock indiquait ${item.available} · par ${user.name} · stock à vérifier`, 'low-stock');
     for (const product of sale.lowStockCrossings) createNotification('Alerte stock bas', `${product.name} · reste ${product.quantity} ${product.unit} · seuil ${product.threshold}`, 'low-stock');
     return send(response, 201, { sale });
   }

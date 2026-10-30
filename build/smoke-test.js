@@ -81,7 +81,8 @@ const totp = (secretHex, step) => {
   r = await cashier('POST', '/api/products', { name: 'Hack', price: 1 }); ok('worker cannot add products by default', r.status === 403 || r.status === 401, r);
   r = await cashier('POST', '/api/sales', { lines: [{ productId, qty: 2 }], payment: 'Espèces', received: 100 });
   ok('worker makes a sale', r.status === 201 || r.status === 200, r); ok('change is correct (100 - 51 = 49)', r.json && r.json.sale && r.json.sale.changeCents === 4900, r.json);
-  r = await cashier('POST', '/api/sales', { lines: [{ productId, qty: 5 }], payment: 'Espèces', received: 500 }); ok('cannot oversell stock', r.status === 409, r);
+  await owner('POST', '/api/security', { strictStock: true });
+  r = await cashier('POST', '/api/sales', { lines: [{ productId, qty: 5 }], payment: 'Espèces', received: 500 }); ok('with the strict stock rule on, an oversell is refused', r.status === 409, r); await owner('POST', '/api/security', { strictStock: false });
 
   r = await owner('POST', '/api/team/' + sara + '/product-permission', { allowed: true, hours: 8 }); ok('owner grants "add products" for 8 h', r.status === 200 && r.json.until, r);
   r = await cashier('POST', '/api/products', { name: 'Savon doux', barcode: '6111000000024', price: 12, quantity: 5, reorderLevel: 1 }); ok('worker with grant can add a product', r.status === 201, r);
