@@ -760,9 +760,21 @@ async function api(request, response, url) {
     createNotification('Badge employé associé', `${pairing.name} · téléphone ajouté`, 'security');
     return send(response, 201, { deviceId, secret, name:pairing.name, business:'PromedPara', relay: remoteLink.enabled ? { base: remoteLink.url.replace(/\/$/, ''), tillId: remoteLink.tillId, key: remoteLink.workerKey } : null });
   }
+  const shiftOf = userId => {
+    const shopDay = date => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Casablanca', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(part => [part.type, part.value])); return p.year + '-' + p.month + '-' + p.day; };
+    const today = shopDay(new Date());
+    const rows = db.prepare('SELECT id,total_cents,created_at FROM sales WHERE cashier_id=? AND created_at>=? ORDER BY created_at').all(userId, new Date(Date.now() - 36 * 3600_000).toISOString()).filter(row => shopDay(new Date(row.created_at)) === today);
+    let items = 0;
+    for (const row of rows) items += Number(db.prepare('SELECT COALESCE(SUM(qty),0) AS n FROM sale_lines WHERE sale_id=?').get(row.id).n) || 0;
+    return { day: today, tickets: rows.length, totalCents: rows.reduce((sum, row) => sum + row.total_cents, 0), items: items, first: rows.length ? rows[0].created_at : '', last: rows.length ? rows[rows.length - 1].created_at : '' };
+  };
+  if (route === '/api/me/shift' && request.method === 'GET') {
+    const me = requireUser(request);
+    return send(response, 200, shiftOf(me.id));
+  }
   if (route === '/api/logout' && request.method === 'POST') {
     const ending = sessions.get(cookieToken(request)), who = ending && db.prepare('SELECT name,role FROM users WHERE id=?').get(ending.userId);
-    if (who && who.role === 'cashier') createNotification('Employé déconnecté', `${who.name} · a fermé la caisse`, 'staff');
+    if (who && who.role === 'cashier') { const day = shiftOf(ending.userId); createNotification('Employé déconnecté', `${who.name} · a fermé la caisse · ${day.tickets} ticket(s), ${(day.totalCents / 100).toFixed(2).replace('.', ',')} MAD aujourd’hui`, 'staff'); }
     sessions.delete(cookieToken(request));
     return send(response, 200, { ok: true }, { 'Set-Cookie': 'pp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
   }
