@@ -639,6 +639,11 @@ async function api(request, response, url) {
         if (passwordMatches(pin, candidate.pin_hash)) { match = candidate; break; }
       }
     }
+    if (!match && pin.length >= 4 && pin.length <= 64) {
+      for (const owner of db.prepare("SELECT pin_hash,password_hash FROM users WHERE active=1 AND role='owner'").all()) {
+        if ((owner.pin_hash && passwordMatches(pin, owner.pin_hash)) || (owner.password_hash && passwordMatches(pin, owner.password_hash))) throw new HttpError(403, 'Ce code est celui d’un propriétaire : touchez « Connexion avec mon nom et mon code » en bas de l’écran.');
+      }
+    }
     if (!match) {
       pinFailures.push(now);
       if (pinFailures.length === 8) createNotification('Tentatives de code PIN répétées', '8 codes PIN incorrects en moins de 10 minutes sur la caisse. Saisie bloquée 10 minutes.', 'security');
@@ -784,14 +789,20 @@ async function api(request, response, url) {
     return send(response, 200, { idleSeconds: Math.round((Date.now() - lastActivityAt) / 1000) });
   }
   if (route === '/api/update/status' && request.method === 'GET') {
-    requireOwner(request);
+    const viewer = requireUser(request);
     let status = {};
     try { status = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'update-status.json'), 'utf8')); } catch { /* not written yet */ }
+    if (viewer.role !== 'owner') return send(response, 200, { current: APP_VERSION, staged: status.staged || '' });
     return send(response, 200, Object.assign({ enabled: false, current: APP_VERSION, saved: [] }, status, { current: APP_VERSION }));
   }
   if (route === '/api/update/command' && request.method === 'POST') {
-    const actor = requireOwner(request), body = await readBody(request), action = String(body.action || '');
+    const actor = requireUser(request), body = await readBody(request), action = String(body.action || '');
     if (!['check', 'apply', 'rollback'].includes(action)) throw new HttpError(400, 'Commande inconnue.');
+    if (actor.role !== 'owner') {
+      if (action !== 'apply') throw new HttpError(403, 'Réservé au propriétaire.');
+      let ready = ''; try { ready = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'update-status.json'), 'utf8')).staged || ''; } catch { /* none */ }
+      if (!ready) throw new HttpError(409, 'Aucune mise à jour n’est prête.');
+    }
     const version = clean(body.version, 20);
     if (action === 'rollback' && !/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(version)) throw new HttpError(400, 'Version invalide.');
     fs.writeFileSync(path.join(DATA_DIR, 'update-command.json'), JSON.stringify({ action, version, by: actor.name, at: isoNow() }));
