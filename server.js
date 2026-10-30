@@ -277,6 +277,8 @@ let legacyDbJob = null;
 const securityFile = path.join(DATA_DIR, 'security.json');
 const loadSecurity = () => { try { return JSON.parse(fs.readFileSync(securityFile, 'utf8')) || {}; } catch (error) { return {}; } };
 const saveSecurity = value => fs.writeFileSync(securityFile, JSON.stringify(value, null, 2));
+const updatePolicyFile = path.join(DATA_DIR, 'update-policy.json');
+const loadUpdatePolicy = () => { try { return JSON.parse(fs.readFileSync(updatePolicyFile, 'utf8')) || {}; } catch (error) { return {}; } };
 const loginApprovals = new Map();      // id -> { userId, name, wait, status, createdAt }
 const APPROVAL_MS = 120_000;
 const purgeApprovals = () => { const now = Date.now(); for (const [key, entry] of loginApprovals) if (now - entry.createdAt > APPROVAL_MS + 60_000) loginApprovals.delete(key); };
@@ -471,7 +473,7 @@ async function api(request, response, url) {
     const token = randomBytes(32).toString('base64url'); sessions.set(token, { userId: owner.id, expires: Date.now() + 30 * 86400_000 });
     return send(response, 201, { user: userSafe(owner) }, { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 86400}` });
   }
-  const needsPhoneApproval = (user, request) => user.role === 'owner' && isLocal(request) && loadSecurity().phoneApproval === true && Boolean(db.prepare('SELECT 1 AS x FROM owner_devices WHERE user_id=? AND active=1').get(user.id));
+  const needsPhoneApproval = (user, request) => user.role === 'owner' && isLocal(request) && process.env.PROMEDPARA_ENABLE_PHONE_APPROVAL === '1' && loadSecurity().phoneApproval === true && Boolean(db.prepare('SELECT 1 AS x FROM owner_devices WHERE user_id=? AND active=1').get(user.id));
   const startApproval = (user, response) => {
     purgeApprovals();
     for (const [key, entry] of loginApprovals) if (entry.userId === user.id && entry.status === 'pending') loginApprovals.delete(key);
@@ -814,8 +816,17 @@ async function api(request, response, url) {
     const viewer = requireUser(request);
     let status = {};
     try { status = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'update-status.json'), 'utf8')); } catch { /* not written yet */ }
-    if (viewer.role !== 'owner') return send(response, 200, { current: APP_VERSION, staged: status.staged || '', lastCheck: status.lastCheck || '', message: status.message || '' });
-    return send(response, 200, Object.assign({ enabled: false, current: APP_VERSION, saved: [] }, status, { current: APP_VERSION }));
+    const policy = loadUpdatePolicy(), mandatory = Boolean(status.staged && policy.mandatory === true && policy.version === status.staged);
+    if (viewer.role !== 'owner') return send(response, 200, { current: APP_VERSION, staged: status.staged || '', lastCheck: status.lastCheck || '', message: status.message || '', mandatory });
+    return send(response, 200, Object.assign({ enabled: false, current: APP_VERSION, saved: [] }, status, { current: APP_VERSION, mandatory }));
+  }
+  if (route === '/api/update/policy' && request.method === 'POST') {
+    const actor = requireOwner(request), body = await readBody(request);
+    let staged = ''; try { staged = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'update-status.json'), 'utf8')).staged || ''; } catch { /* none */ }
+    if (!staged) throw new HttpError(409, 'Aucune mise à jour n’est prête.');
+    fs.writeFileSync(updatePolicyFile, JSON.stringify({ mandatory: body.mandatory === true, version: staged }));
+    createNotification('Mise à jour', 'Version ' + staged + ' : ' + (body.mandatory === true ? 'obligatoire pour les employés' : 'facultative pour les employés') + ' · ' + actor.name, 'security');
+    return send(response, 200, { ok: true, mandatory: body.mandatory === true, version: staged });
   }
   if (route === '/api/update/command' && request.method === 'POST') {
     const actor = requireUser(request), body = await readBody(request), action = String(body.action || '');

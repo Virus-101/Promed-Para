@@ -121,3 +121,14 @@ html[data-theme="dark"] .crumb,html[data-theme="dark"] .crumb b{color:#a9b9af!im
 .learn-recent{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}.learn-recent li{display:flex;justify-content:space-between;gap:12px;padding:8px 10px;border-radius:10px;background:#f1f6f3}
 html[data-theme="dark"] .learn-barcode,html[data-theme="dark"] .learn-pending,html[data-theme="dark"] .learn-recent li{background:#17211c!important;color:#e5eee8}
 html[data-theme="dark"] .learn-barcode label{color:#e5eee8}
+
+/* update notice in the employee's left bar */
+.rail-update{display:flex;align-items:center;gap:10px;width:100%;margin:0 0 10px;padding:11px 12px;border:1px solid rgba(255,255,255,.2);border-radius:14px;background:rgba(255,255,255,.12);color:inherit;text-align:left;cursor:pointer}
+.rail-update b{display:block;font-size:13px}.rail-update small{display:block;opacity:.8;font-size:11px}
+.rail-update-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:rgba(255,255,255,.18)}
+.rail-update.must{background:#a63d37;border-color:#d27a74}
+.rail-update{background:#e9f6ee;color:#14543a;border-color:#bcd9c6}
+.rail-update-icon{background:#cfe9d9;color:#14543a}
+.rail-update.must{background:#a63d37;border-color:#d27a74;color:#fff}.rail-update.must .rail-update-icon{background:rgba(255,255,255,.2);color:#fff}
+html[data-theme="dark"] .rail-update{background:#17302a!important;color:#cfe9d9;border-color:#2a4a3c}
+html[data-theme="dark"] .rail-update.must{background:#7a2a26!important;color:#fff}

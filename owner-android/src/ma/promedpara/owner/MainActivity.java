@@ -96,7 +96,7 @@ public final class MainActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         if (prefs == null) return;
-        approvalHandler.removeCallbacks(approvalPoll); approvalHandler.postDelayed(approvalPoll, 1500);
+        approvalHandler.removeCallbacks(approvalPoll);
         if (unlocked && pausedAt > 0 && System.currentTimeMillis() - pausedAt > 120000 && !prefs.getString("deviceToken", "").isEmpty()) { unlocked = false; pausedAt = 0; showUnlock(); return; }
         Updater.check(this, prefs.getString("server", ""), "PromedPara-Owner.apk");
     }
