@@ -58,3 +58,9 @@
 .autostart-ok{display:flex;align-items:center;gap:8px;color:#1b6b45;margin:6px 0}.autostart-off{display:flex;align-items:center;gap:8px;color:#a15c07;margin:6px 0}.autostart-card .team-access-actions{margin-top:10px}
 
 .remember-pc{display:flex;align-items:center;gap:8px;margin:12px 0 2px;font-size:14px;color:#173d2a}.remember-pc input{width:18px;height:18px}
+
+/* signing in: the Promed mark turns while the till checks the code */
+.login-busy{position:fixed;inset:0;z-index:99999;display:grid;place-items:center;background:rgba(0,0,0,.6);color:#fff;text-align:center}
+.login-busy img{width:88px;height:88px;object-fit:contain;animation:pp-turn 1.1s linear infinite}
+.login-busy p{margin:14px 0 0;font-weight:700;letter-spacing:.02em}
+@keyframes pp-turn{to{transform:rotate(360deg)}}

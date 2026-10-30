@@ -669,9 +669,10 @@ async function api(request, response, url) {
     return send(response, 200, { ok: true });
   }
   if (route === '/api/barcode-link' && request.method === 'POST') {
-    const owner = requireOwner(request), body = await readBody(request), code = clean(body.code, 80);
+    const owner = requireUser(request), body = await readBody(request), code = clean(body.code, 80);
     const product = db.prepare('SELECT id,name,barcode FROM products WHERE id=? AND active=1').get(clean(body.productId, 100));
     if (!product) throw new HttpError(404, 'Produit introuvable.');
+    if (owner.role !== 'owner' && product.barcode) throw new HttpError(403, 'Ce produit a déjà un code-barres : seul le propriétaire peut le changer.');
     if (!code) throw new HttpError(400, 'Code vide.');
     const clash = db.prepare('SELECT name FROM products WHERE barcode=? AND id<>?').get(code, product.id);
     if (clash) throw new HttpError(409, 'Ce code appartient déjà à « ' + clash.name + ' ».');
