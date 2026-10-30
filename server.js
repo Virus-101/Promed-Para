@@ -808,12 +808,12 @@ async function api(request, response, url) {
     if(!stage||stage.expiresAt<Date.now())throw new HttpError(410,'L’aperçu a expiré. Sélectionnez de nouveau le fichier.');
     if(db.prepare('SELECT 1 FROM product_imports WHERE source_hash=?').get(stage.sourceHash))throw new HttpError(409,'Ce fichier a déjà été importé sur ce poste.');
     const required=['name','price','quantity'],optional=['category','cost','threshold','image'],mapping=body.mapping||{};
-    if(!['skip','add_separate'].includes(body.duplicatePolicy))throw new HttpError(400,'Choisissez la règle de traitement des noms répétés.');
+    if(!['skip','add_separate','update'].includes(body.duplicatePolicy))throw new HttpError(400,'Choisissez la règle de traitement des noms répétés.');
     for(const key of required){const index=Number(mapping[key]);if(!Number.isInteger(index)||index<0||index>=stage.headers.length)throw new HttpError(400,`Associez une colonne valide au champ ${key}.`);}
     for(const key of optional){const index=Number(mapping[key]??-1);if(!Number.isInteger(index)||index < -1||index>=stage.headers.length)throw new HttpError(400,`Colonne invalide pour ${key}.`);}
-    const selected = new Map();
-    const existing = db.prepare('SELECT name FROM products WHERE active=1').all();
-    for(const product of existing)selected.set(normalizeProductName(product.name),'existing');
+    const selected = new Map(), byName = new Map(), updates = [];
+    const existing = db.prepare('SELECT id,name,quantity FROM products WHERE active=1').all();
+    for(const product of existing){selected.set(normalizeProductName(product.name),'existing');byName.set(normalizeProductName(product.name),product);}
     let added=0, skippedExisting=0, skippedInvalid=0, skippedZeroPrice=0, negativeQuantity=0;
     const inserts=[];
     for(let index=0;index<stage.grid.length;index++){
@@ -823,12 +823,14 @@ async function api(request, response, url) {
       const category=mapping.category>=0?clean(get('category'),80):'',cost=mapping.cost>=0?csvNumber(get('cost')):0,price=csvNumber(get('price')),quantity=csvNumber(get('quantity')),threshold=mapping.threshold>=0?csvNumber(get('threshold')):0,imageUrl=mapping.image>=0?safeImageUrl(get('image')):'';
       if(!name||!normalizedName||cost===null||price===null||quantity===null||threshold===null||cost<0||price<0||quantity<0||threshold<0){skippedInvalid++;if(quantity!==null&&quantity<0)negativeQuantity++;continue;}
       if(price===0&&!body.allowZeroSalePrice){skippedZeroPrice++;continue;}
+      if(body.duplicatePolicy==='update'&&byName.has(normalizedName)&&selected.get(normalizedName)==='existing'){updates.push({product:byName.get(normalizedName),priceCents:cents(price),costCents:cents(cost),quantity,threshold,hasThreshold:mapping.threshold>=0,hasCost:mapping.cost>=0});selected.set(normalizedName,'updated');continue;}
+      if(body.duplicatePolicy==='update'&&selected.has(normalizedName)){skippedExisting++;continue;}
       if(body.duplicatePolicy==='skip'&&selected.has(normalizedName)){skippedExisting++;continue;}
       if(body.duplicatePolicy==='skip')selected.set(normalizedName,'source');
       const createdAt=isoNow(),productId=id('prod'),sku=`IMP-${stage.sourceHash.slice(0,8)}-${String(lineNumber).padStart(5,'0')}`;
       inserts.push({id:productId,sku,name,category,quantity,reorderLevel:threshold,priceCents:cents(price),costCents:cents(cost),imageUrl,createdAt,lineNumber});
     }
-    if(!inserts.length)throw new HttpError(409,'Aucune ligne admissible. Vérifiez les colonnes, les prix nuls et les quantités négatives avant de réessayer.');
+    if(!inserts.length&&!updates.length)throw new HttpError(409,'Aucune ligne admissible. Vérifiez les colonnes, les prix nuls et les quantités négatives avant de réessayer.');
     db.exec('BEGIN IMMEDIATE');
     try{
       const addProduct=db.prepare('INSERT INTO products(id,barcode,sku,name,category,unit,quantity,reorder_level,price_cents,cost_cents,image_url,updated_at) VALUES(?,NULL,?,?,? ,\'unité\',?,?,?,?,?,?)');
@@ -837,13 +839,20 @@ async function api(request, response, url) {
         addProduct.run(product.id,product.sku,product.name,product.category,product.quantity,product.reorderLevel,product.priceCents,product.costCents,product.imageUrl,product.createdAt);
         addMovement.run(id('move'),product.id,product.name,'Import catalogue',product.quantity,stage.sourceName,owner.id,owner.name,'',product.createdAt);
       }
+      const refresh=db.prepare('UPDATE products SET quantity=?,price_cents=?,cost_cents=CASE WHEN ? THEN ? ELSE cost_cents END,reorder_level=CASE WHEN ? THEN ? ELSE reorder_level END,updated_at=? WHERE id=?');
+      for(const change of updates){
+        const stamp=isoNow();
+        refresh.run(change.quantity,change.priceCents,change.hasCost?1:0,change.costCents,change.hasThreshold?1:0,change.threshold,stamp,change.product.id);
+        const delta=change.quantity-Number(change.product.quantity||0);
+        if(delta!==0)addMovement.run(id('move'),change.product.id,change.product.name,'Mise à jour catalogue',delta,stage.sourceName,owner.id,owner.name,'',stamp);
+      }
       db.prepare('INSERT INTO product_imports(id,source_name,source_hash,rows_seen,rows_added,created_at,user_id) VALUES(?,?,?,?,?,?,?)').run(id('import'),stage.sourceName,stage.sourceHash,stage.grid.length,inserts.length,isoNow(),owner.id);
       db.exec('COMMIT');
     }catch(error){db.exec('ROLLBACK');throw error;}
     pendingProductImports.delete(body.stageId);
     added=inserts.length;
-    createNotification('Catalogue importé',`${added} produit(s) ajouté(s) depuis ${stage.sourceName} · ${skippedExisting} doublon(s) ignoré(s)`, 'stock');
-    return send(response,201,{ok:true,added,skippedExisting,skippedInvalid,skippedZeroPrice,negativeQuantity,sourceName:stage.sourceName});
+    createNotification('Catalogue importé',`${added} produit(s) ajouté(s)${updates.length?' · '+updates.length+' mis à jour':''} depuis ${stage.sourceName} · ${skippedExisting} doublon(s) ignoré(s)`, 'stock');
+    return send(response,201,{ok:true,added,updated:updates.length,skippedExisting,skippedInvalid,skippedZeroPrice,negativeQuantity,sourceName:stage.sourceName});
   }
   if (route === '/api/sales' && request.method === 'POST') {
     const user = requireUser(request), body = await readBody(request), lines = Array.isArray(body.lines) ? body.lines : [];
