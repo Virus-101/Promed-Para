@@ -270,6 +270,7 @@ let ringTimes = [];
 const activePairingCodes = () => { const now = Date.now(); for (const [code, until] of livePairingCodes) if (until < now) livePairingCodes.delete(code); return Array.from(livePairingCodes.keys()); };
 let remoteLink = { enabled: false, connected: false, address: '' };
 let startRemote = () => {};
+let legacyDbJob = null;
 
 // ---- security of this till: an owner signing in on the till itself can be made to approve it on their own phone
 const securityFile = path.join(DATA_DIR, 'security.json');
@@ -404,6 +405,25 @@ async function api(request, response, url) {
     await autostart.enable(process.env.PROMEDPARA_EXE);
     createNotification('Démarrage automatique activé', 'La caisse s’ouvrira toute seule à l’allumage du PC · par ' + actor.name, 'info');
     return send(response, 200, await autostart.status(process.env.PROMEDPARA_EXE));
+  }
+  if (route === '/api/legacy-db/scan' && request.method === 'POST') {
+    requireOwner(request);
+    if (!isLocal(request)) throw new HttpError(403, 'À lancer depuis la caisse elle-même.');
+    const body = await readBody(request);
+    if (!legacyDbJob || !legacyDbJob.running) {
+      const job = { running: true, startedAt: Date.now(), report: null, text: '', error: '' };
+      legacyDbJob = job;
+      require('./legacy-db').scan({ keyword: clean(body.keyword, 30) || 'logica' }).then(report => {
+        job.report = report; job.text = require('./legacy-db').text(report); job.running = false;
+        try { fs.writeFileSync(path.join(DATA_DIR, 'rapport-ancien-logiciel.txt'), job.text); } catch (error) { /* the screen still has it */ }
+      }).catch(error => { job.error = error.message; job.running = false; });
+    }
+    return send(response, 200, { running: legacyDbJob.running });
+  }
+  if (route === '/api/legacy-db/scan' && request.method === 'GET') {
+    requireOwner(request);
+    const job = legacyDbJob;
+    return send(response, 200, job ? { started: true, running: job.running, error: job.error, text: job.text, report: job.report } : { started: false });
   }
   if (route === '/api/legacy-export/check' && request.method === 'POST') {
     requireOwner(request);
