@@ -9,7 +9,7 @@ const crypto = require('crypto');
 
 const handleOf = name => crypto.createHash('sha256').update('promed-handle:' + String(name || '').trim().toLowerCase()).digest('hex');
 const WORKER_ALLOWED = [['POST', '/api/qr-login/approve']];
-const ALLOWED = [['POST', '/api/owner/device-login'], ['POST', '/api/owner/unlock'], ['POST', '/api/owner/device-logout'], ['GET', '/api/login-approvals'], ['POST', '/api/login-approvals/respond'], ['GET', '/api/overview'], ['GET', '/api/notifications'], ['GET', '/api/me'], ['POST', '/api/logout']];
+const ALLOWED = [['POST', '/api/owner/device-login'], ['POST', '/api/owner/unlock'], ['POST', '/api/owner/device-logout'], ['GET', '/api/login-approvals'], ['POST', '/api/login-approvals/respond'], ['GET', '/api/mobile/products'], ['GET', '/api/overview'], ['GET', '/api/notifications'], ['GET', '/api/me'], ['POST', '/api/logout']];
 const MAX_SKEW_MS = 5 * 60000;
 
 function seal(key, text) {

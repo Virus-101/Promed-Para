@@ -773,6 +773,24 @@ async function api(request, response, url) {
     for (const row of rows) items += Number(db.prepare('SELECT COALESCE(SUM(qty),0) AS n FROM sale_lines WHERE sale_id=?').get(row.id).n) || 0;
     return { day: today, tickets: rows.length, totalCents: rows.reduce((sum, row) => sum + row.total_cents, 0), items: items, first: rows.length ? rows[0].created_at : '', last: rows.length ? rows[rows.length - 1].created_at : '' };
   };
+  if (route === '/api/mobile/products' && request.method === 'GET') {
+    requireOwner(request);
+    const params = url.searchParams, q = String(params.get('q') || '').replace(/[%_]/g, ' ').trim().slice(0, 60), filter = String(params.get('filter') || 'all');
+    const offset = Math.max(0, Number(params.get('offset')) || 0), limit = Math.min(200, Math.max(10, Number(params.get('limit')) || 60));
+    const wheres = { all: '1=1', low: 'quantity<=reorder_level', out: 'quantity<=0', review: "(price_cents<=0 OR cost_cents<=0 OR TRIM(IFNULL(category,''))='')" };
+    const where = wheres[filter] || wheres.all, like = '%' + q + '%';
+    const search = "(name LIKE ? OR sku LIKE ? OR IFNULL(barcode,'') LIKE ? OR IFNULL(category,'') LIKE ?)";
+    const total = db.prepare('SELECT COUNT(*) AS n FROM products WHERE active=1 AND ' + where + ' AND ' + search).get(like, like, like, like).n;
+    const items = db.prepare('SELECT id,name,category,unit,quantity,reorder_level,price_cents,cost_cents,barcode FROM products WHERE active=1 AND ' + where + ' AND ' + search + ' ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?').all(like, like, like, like, limit, offset).map(row => {
+      const issues = [];
+      if (row.price_cents <= 0) issues.push('prix de vente à 0');
+      if (row.cost_cents <= 0) issues.push('prix d’achat manquant');
+      if (!String(row.category || '').trim()) issues.push('sans catégorie');
+      return { id: row.id, name: row.name, category: row.category || '', unit: row.unit || 'unité', quantity: row.quantity, reorder: row.reorder_level, priceCents: row.price_cents, costCents: row.cost_cents, hasBarcode: Boolean(row.barcode), low: row.quantity <= row.reorder_level, issues };
+    });
+    const count = clause => db.prepare('SELECT COUNT(*) AS n FROM products WHERE active=1 AND ' + clause).get().n;
+    return send(response, 200, { total, offset, items, counts: { all: count('1=1'), low: count(wheres.low), out: count(wheres.out), review: count(wheres.review) } });
+  }
   if (route === '/api/me/shift' && request.method === 'GET') {
     const me = requireUser(request);
     return send(response, 200, shiftOf(me.id));

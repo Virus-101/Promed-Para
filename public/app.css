@@ -70,3 +70,43 @@
 .shift-chip small{opacity:.8;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
 .shift-chip strong{font-size:20px;line-height:1.1}
 .shift-chip span{opacity:.75;font-size:12px}
+
+/* night mode (employee profile) */
+html[data-theme="dark"]{--bg:#0e1511;--paper:#17211c;--ink:#e5eee8;--muted:#94a59b;--line:#25332b;--green-soft:#1c3226;color-scheme:dark}
+html[data-theme="dark"] body{background:#0e1511;color:#e5eee8}
+html[data-theme="dark"] .main,html[data-theme="dark"] .content{background:#0e1511}
+html[data-theme="dark"] .auth-wrap{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .field input{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .field select{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .field textarea{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .secondary{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .rail{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .connection{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .search-input{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .cat-button{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .product-card{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .stepper button{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .pay-choice button{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .metric{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .supplier-card{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .device-card{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .modal{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .service-card{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .import-preview-table-wrap{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .import-preview-table{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .import-preview-table td{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .wizard-modes button{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .qr-box{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .check-file{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] input,html[data-theme="dark"] select,html[data-theme="dark"] textarea{background:#101a15!important;color:#e5eee8!important;border-color:#2a3b32!important}
+html[data-theme="dark"] h1,html[data-theme="dark"] h2,html[data-theme="dark"] h3,html[data-theme="dark"] h4,html[data-theme="dark"] strong,html[data-theme="dark"] b,html[data-theme="dark"] label,html[data-theme="dark"] .wizard-body h3{color:#e5eee8!important}
+html[data-theme="dark"] .button.secondary,html[data-theme="dark"] .cat-button,html[data-theme="dark"] .product-card{background:#17211c!important;color:#e5eee8!important;border-color:#2a3b32!important}
+html[data-theme="dark"] .wizard-big{background:#101a15!important;border-color:#2a3b32!important;color:#e5eee8!important}
+html[data-theme="dark"] small,html[data-theme="dark"] .hint,html[data-theme="dark"] p{color:#a9b9af}
+html[data-theme="dark"] .modal-backdrop{background:rgba(0,0,0,.7)}
+.user-open{display:flex;align-items:center;gap:10px;flex:1;min-width:0;padding:0;border:0;background:none;color:inherit;text-align:left;cursor:pointer}
+html[data-theme="dark"] .topbar,html[data-theme="dark"] header.topbar{background:#121b16!important;border-color:#25332b!important;color:#e5eee8}
+html[data-theme="dark"] .scan-wrap,html[data-theme="dark"] .ticket-no,html[data-theme="dark"] .ticket-summary,html[data-theme="dark"] .owner-phone-hint,html[data-theme="dark"] .status-note,html[data-theme="dark"] .avatar{background:#17211c!important;color:#e5eee8}
+html[data-theme="dark"] .ticket-summary *,html[data-theme="dark"] .scan-wrap *{color:#e5eee8}
+html[data-theme="dark"] .ticket-summary input,html[data-theme="dark"] .scan-wrap input{background:#101a15!important}
+html[data-theme="dark"] .crumb,html[data-theme="dark"] .crumb b{color:#a9b9af!important}

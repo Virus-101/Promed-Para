@@ -420,6 +420,7 @@ public final class MainActivity extends Activity {
         begin("Vue propriétaire", "Bonjour, "+name+".", "Résumé et alertes du poste PromedPara.", false);
         LinearLayout area=column(); pad(area,16,17,16,28); root.addView(area);
         if(data==null){TextView loading=text("Chargement des ventes et du stock…",14,MUTED,false);withIcon(loading,"activity",18,MUTED,8);area.addView(loading);Button retry=button("Réessayer",true,"refresh_cw",this::loadDashboard);LinearLayout.LayoutParams rp=lp(-1,54);rp.topMargin=dp(12);area.addView(retry,rp);Button logout=button("Déconnexion",false,"log_out",this::logout);LinearLayout.LayoutParams op=lp(-1,52);op.topMargin=dp(8);area.addView(logout,op);loadDashboard();return;}
+        if(!prefs.getBoolean("monitoring",false)&&!prefs.getBoolean("userStopped",false)&&!askedAlertsThisRun){askedAlertsThisRun=true;requestNotificationPermissionAndStart();}
         LinearLayout metrics=row(); area.addView(metrics);
         addMetric(metrics,"VENTES AUJOURD’HUI",money(data.optLong("revenueCents")),data.optInt("salesCount")+" ticket(s)",true,"trending_up");
         addMetric(metrics,"PRODUITS",String.valueOf(data.optInt("productCount")),data.optJSONArray("lowStock")==null?"Catalogue":"Stock local",false,"package");
@@ -434,6 +435,11 @@ public final class MainActivity extends Activity {
         LinearLayout actions=row(); LinearLayout.LayoutParams ap=lp(-1,-2);ap.topMargin=dp(10);area.addView(actions,ap);
         Button refresh=button("Actualiser",false,"refresh_cw",this::loadDashboard); LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,dp(52),1);rp.setMargins(0,0,dp(5),0);actions.addView(refresh,rp);
         Button logout=button("Déconnexion",false,"log_out",this::logout); LinearLayout.LayoutParams lop=new LinearLayout.LayoutParams(0,dp(52),1);lop.setMargins(dp(5),0,0,0);actions.addView(logout,lop);
+        prodQuery="";
+        Button allProducts=button("Tous les produits ("+data.optInt("productCount")+")",true,"package",()->showProducts("all")); LinearLayout.LayoutParams apL=lp(-1,56); apL.topMargin=dp(14); area.addView(allProducts,apL);
+        LinearLayout quick=row(); LinearLayout.LayoutParams qk=lp(-1,-2); qk.topMargin=dp(10); area.addView(quick,qk);
+        Button lowBtn=button("Stock bas",false,"triangle_alert",()->showProducts("low")); LinearLayout.LayoutParams lb=new LinearLayout.LayoutParams(0,dp(52),1); lb.setMargins(0,0,dp(5),0); quick.addView(lowBtn,lb);
+        Button reviewBtn=button("À réviser",false,"shield_check",()->showProducts("review")); LinearLayout.LayoutParams rv=new LinearLayout.LayoutParams(0,dp(52),1); rv.setMargins(dp(5),0,0,0); quick.addView(reviewBtn,rv);
         addSection(area,"STOCK À SURVEILLER","triangle_alert",lowStockText(data.optJSONArray("lowStock")));
         addSection(area,"FOURNISSEURS","truck",suppliersText(currentSuppliers));
         addSection(area,"ACTIVITÉ RÉCENTE","receipt",notificationsText(data.optJSONArray("notifications")));
@@ -469,15 +475,79 @@ public final class MainActivity extends Activity {
         io.execute(() -> {try{Result r=requestAuthed(prefs,"/api/overview","GET",null);if(r.status==401||r.status==403){runOnUiThread(this::showUnlock);return;}JSONObject j=new JSONObject(r.body);if(r.status<200||r.status>=300)throw new Exception(j.optString("error","Chargement impossible."));JSONArray suppliers=null;try{Result sr=requestAuthed(prefs,"/api/suppliers","GET",null);if(sr.status>=200&&sr.status<300)suppliers=new JSONObject(sr.body).optJSONArray("suppliers");}catch(Exception ignored){}JSONArray finalSuppliers=suppliers;runOnUiThread(()->{currentSuppliers=finalSuppliers;showDashboard(j);});}catch(Exception e){runOnUiThread(()->toast("Connexion au poste impossible. Vérifiez le Wi‑Fi puis actualisez."));}});
     }
 
+    // ---- the whole catalogue on the phone: search, low stock, products to review
+    private String prodFilter = "all", prodQuery = ""; private int prodOffset = 0, prodTotal = 0; private long prodToken;
+    private LinearLayout prodList; private TextView prodInfo; private Button prodMore;
+    private void showProducts(String filter) {
+        prodFilter = filter; prodOffset = 0; prodTotal = 0;
+        begin("Propriétaire", "Produits", "Tout le catalogue de la caisse, le stock bas et ce qui est à réviser.", false);
+        LinearLayout area = column(); pad(area, 16, 14, 16, 28); root.addView(area);
+        Button back = button("Retour au tableau de bord", false, null, this::loadDashboard); area.addView(back, lp(-1, 50));
+        LinearLayout chips = row(); LinearLayout.LayoutParams chp = lp(-1, -2); chp.topMargin = dp(12); area.addView(chips, chp);
+        String[][] tabs = { { "all", "Tous" }, { "low", "Stock bas" }, { "review", "À réviser" } };
+        for (int i = 0; i < tabs.length; i++) {
+            final String key = tabs[i][0]; Button b = button(tabs[i][1], key.equals(filter), null, () -> showProducts(key));
+            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(48), 1); p.setMargins(i == 0 ? 0 : dp(4), 0, i == tabs.length - 1 ? 0 : dp(4), 0); chips.addView(b, p);
+        }
+        final EditText search = field("Chercher un produit, une catégorie ou un code", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS); search.setText(prodQuery);
+        LinearLayout.LayoutParams sp = lp(-1, 54); sp.topMargin = dp(12); area.addView(search, sp);
+        final android.os.Handler later = new android.os.Handler(android.os.Looper.getMainLooper());
+        final Runnable fire = () -> { prodQuery = search.getText().toString().trim(); prodOffset = 0; loadProducts(true); };
+        search.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            public void afterTextChanged(android.text.Editable e) { later.removeCallbacks(fire); later.postDelayed(fire, 350); }
+        });
+        prodInfo = text("Chargement…", 13, MUTED, false); prodInfo.setPadding(0, dp(12), 0, dp(6)); area.addView(prodInfo);
+        prodList = column(); area.addView(prodList);
+        prodMore = button("Afficher plus", false, null, () -> loadProducts(false)); LinearLayout.LayoutParams mp = lp(-1, 52); mp.topMargin = dp(10); area.addView(prodMore, mp); prodMore.setVisibility(View.GONE);
+        loadProducts(true);
+    }
+    private void loadProducts(final boolean reset) {
+        final long token = ++prodToken; final int offset = reset ? 0 : prodOffset;
+        io.execute(() -> {
+            try {
+                Result r = requestAuthed(prefs, "/api/mobile/products?filter=" + prodFilter + "&q=" + java.net.URLEncoder.encode(prodQuery, "UTF-8") + "&offset=" + offset + "&limit=60", "GET", null);
+                if (r.status != 200) throw new Exception(new JSONObject(r.body).optString("error", "Liste indisponible."));
+                final JSONObject data = new JSONObject(r.body);
+                runOnUiThread(() -> {
+                    if (token != prodToken || prodList == null) return;
+                    if (reset) prodList.removeAllViews();
+                    org.json.JSONArray items = data.optJSONArray("items");
+                    for (int i = 0; items != null && i < items.length(); i++) prodList.addView(productRow(items.optJSONObject(i)));
+                    prodOffset = offset + (items == null ? 0 : items.length()); prodTotal = data.optInt("total");
+                    JSONObject counts = data.optJSONObject("counts");
+                    prodInfo.setText(prodTotal + " produit(s)" + (counts == null ? "" : "  ·  " + counts.optInt("all") + " au total, " + counts.optInt("low") + " en stock bas, " + counts.optInt("out") + " épuisé(s), " + counts.optInt("review") + " à réviser"));
+                    prodMore.setVisibility(prodOffset < prodTotal ? View.VISIBLE : View.GONE);
+                    if (prodTotal == 0) prodInfo.setText("Aucun produit ne correspond.");
+                });
+            } catch (Exception e) { runOnUiThread(() -> { if (token == prodToken && prodInfo != null) prodInfo.setText(message(e)); }); }
+        });
+    }
+    private View productRow(JSONObject p) {
+        LinearLayout card = column(); pad(card, 14, 11, 14, 11); card.setBackground(shape(Color.WHITE, LINE, 13));
+        LinearLayout.LayoutParams cp = lp(-1, -2); cp.topMargin = dp(8); card.setLayoutParams(cp);
+        LinearLayout top = row(); card.addView(top);
+        TextView name = text(p.optString("name"), 15, INK, true); LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(0, -2, 1); top.addView(name, np);
+        TextView price = text(money(p.optLong("priceCents")), 15, INK, true); top.addView(price);
+        double qty = p.optDouble("quantity"); boolean low = p.optBoolean("low");
+        String qtyText = (qty == Math.rint(qty) ? String.valueOf((long) qty) : String.valueOf(qty)) + " " + p.optString("unit") + " en stock · seuil " + (long) p.optDouble("reorder");
+        TextView stock = text((p.optString("category").isEmpty() ? "" : p.optString("category") + " · ") + qtyText, 12, low ? Color.rgb(184, 79, 74) : MUTED, low); card.addView(stock);
+        org.json.JSONArray issues = p.optJSONArray("issues");
+        if (issues != null && issues.length() > 0) { StringBuilder sb = new StringBuilder("À réviser : "); for (int i = 0; i < issues.length(); i++) { if (i > 0) sb.append(", "); sb.append(issues.optString(i)); } TextView issue = text(sb.toString(), 12, Color.rgb(166, 110, 24), true); card.addView(issue); }
+        return card;
+    }
+
     private void requestNotificationPermissionAndStart() {
         if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},51);return;}startMonitoring();
     }
     @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){super.onRequestPermissionsResult(requestCode,permissions,grantResults);if(requestCode==51&&grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED)startMonitoring();else if(requestCode==51)toast("Autorisez les notifications Android pour recevoir les alertes de vente et de stock.");}
 
+    private boolean askedAlertsThisRun;
     private void startMonitoring() {
-        prefs.edit().putBoolean("monitoring",true).apply();Intent i=new Intent(this,MonitorService.class);if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);toast("Surveillance locale démarrée.");loadDashboard();
+        prefs.edit().putBoolean("monitoring",true).remove("userStopped").apply();Intent i=new Intent(this,MonitorService.class);if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);toast("Surveillance locale démarrée.");loadDashboard();
     }
-    private void stopMonitoring() { prefs.edit().putBoolean("monitoring",false).apply();stopService(new Intent(this,MonitorService.class));toast("Surveillance arrêtée.");loadDashboard(); }
+    private void stopMonitoring() { prefs.edit().putBoolean("monitoring",false).putBoolean("userStopped",true).apply();stopService(new Intent(this,MonitorService.class));toast("Surveillance arrêtée.");loadDashboard(); }
     private void logout() {
         unlocked=false; CodeVault.forget(prefs);
         prefs.edit().putBoolean("monitoring",false).apply(); stopService(new Intent(this,MonitorService.class));
