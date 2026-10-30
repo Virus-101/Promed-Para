@@ -102,6 +102,7 @@ if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name ===
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'pin_hash')) {
   db.exec('ALTER TABLE users ADD COLUMN pin_hash TEXT');
 }
+db.exec(`CREATE TABLE IF NOT EXISTS unknown_scans (code TEXT PRIMARY KEY, scans INTEGER NOT NULL DEFAULT 1, first_at TEXT NOT NULL, last_at TEXT NOT NULL)`);
 db.exec(`CREATE TABLE IF NOT EXISTS owner_devices (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_seen_at TEXT
@@ -634,7 +635,7 @@ async function api(request, response, url) {
     const body = await readBody(request), pin = String(body.pin || body.code || '').trim();
     let match = null;
     if (pin.length >= 4 && pin.length <= 64) {
-      for (const candidate of db.prepare("SELECT id,name,username,role,can_receive_stock,pin_hash FROM users WHERE active=1 AND pin_hash IS NOT NULL").all()) {
+      for (const candidate of db.prepare("SELECT id,name,username,role,can_receive_stock,pin_hash FROM users WHERE active=1 AND (role='cashier' OR '1'=?) AND pin_hash IS NOT NULL").all(process.env.PROMEDPARA_ALLOW_MANY_ACCOUNTS === '1' ? '1' : '0')) {
         if (passwordMatches(pin, candidate.pin_hash)) { match = candidate; break; }
       }
     }
@@ -646,6 +647,49 @@ async function api(request, response, url) {
     pinFailures = [];
     if (needsPhoneApproval(match, request)) return startApproval(match, response);
     return send(response, 200, { user: userSafe(match) }, createSession(match));
+  }
+  // codes scanned at the till that no product has yet (the old export carries no barcodes)
+  if (route === '/api/unknown-scans' && request.method === 'POST') {
+    requireUser(request);
+    const body = await readBody(request), code = clean(body.code, 80);
+    if (!code) throw new HttpError(400, 'Code vide.');
+    if (db.prepare('SELECT 1 AS x FROM products WHERE barcode=?').get(code)) return send(response, 200, { known: true });
+    const now = isoNow();
+    db.prepare('INSERT INTO unknown_scans(code,scans,first_at,last_at) VALUES(?,1,?,?) ON CONFLICT(code) DO UPDATE SET scans=scans+1,last_at=excluded.last_at').run(code, now, now);
+    return send(response, 200, { recorded: true });
+  }
+  if (route === '/api/unknown-scans' && request.method === 'GET') {
+    requireOwner(request);
+    return send(response, 200, { codes: db.prepare('SELECT code,scans,last_at FROM unknown_scans ORDER BY last_at DESC LIMIT 100').all() });
+  }
+  if (route === '/api/unknown-scans/dismiss' && request.method === 'POST') {
+    requireOwner(request);
+    const body = await readBody(request);
+    db.prepare('DELETE FROM unknown_scans WHERE code=?').run(clean(body.code, 80));
+    return send(response, 200, { ok: true });
+  }
+  if (route === '/api/barcode-link' && request.method === 'POST') {
+    const owner = requireOwner(request), body = await readBody(request), code = clean(body.code, 80);
+    const product = db.prepare('SELECT id,name,barcode FROM products WHERE id=? AND active=1').get(clean(body.productId, 100));
+    if (!product) throw new HttpError(404, 'Produit introuvable.');
+    if (!code) throw new HttpError(400, 'Code vide.');
+    const clash = db.prepare('SELECT name FROM products WHERE barcode=? AND id<>?').get(code, product.id);
+    if (clash) throw new HttpError(409, 'Ce code appartient déjà à « ' + clash.name + ' ».');
+    db.prepare('UPDATE products SET barcode=?,updated_at=? WHERE id=?').run(code, isoNow(), product.id);
+    db.prepare('DELETE FROM unknown_scans WHERE code=?').run(code);
+    createNotification('Code-barres associé', product.name + ' · ' + code + ' · par ' + owner.name, 'stock');
+    return send(response, 200, { ok: true, product: { id: product.id, name: product.name, barcode: code } });
+  }
+  const removeMatch = route.match(/^\/api\/team\/([^/]+)\/remove$/);
+  if (removeMatch && request.method === 'POST') {
+    const actor = requireOwner(request);
+    if (!isAdmin(actor.id)) throw new HttpError(403, 'Seul l’administrateur peut retirer un compte.');
+    const user = db.prepare('SELECT id,name,role,active FROM users WHERE id=?').get(clean(decodeURIComponent(removeMatch[1]), 100));
+    if (!user || !user.active || user.role !== 'cashier') throw new HttpError(404, 'Compte employé introuvable.');
+    db.prepare('UPDATE users SET active=0,pin_hash=NULL WHERE id=?').run(user.id);
+    for (const [token, session] of sessions) if (session.userId === user.id) sessions.delete(token);
+    createNotification('Employé retiré', user.name + ' ne peut plus ouvrir la caisse · par ' + actor.name, 'security');
+    return send(response, 200, { ok: true });
   }
   const renameMatch = route.match(/^\/api\/team\/([^/]+)\/rename$/);
   if (renameMatch && request.method === 'POST') {
@@ -1191,7 +1235,7 @@ async function api(request, response, url) {
     requireOwner(request);
     const users=db.prepare(`SELECT u.id,u.name,u.username,u.role,u.active,u.created_at,u.can_receive_stock,(u.pin_hash IS NOT NULL) AS has_pin,u.can_add_products,u.add_products_until,
       (SELECT COUNT(*) FROM worker_devices d WHERE d.user_id=u.id AND d.active=1) AS active_devices
-      FROM users u ORDER BY u.role,u.name`).all();
+      FROM users u WHERE u.active=1 OR u.role='owner' ORDER BY u.role,u.name`).all();
     for(const user of users)user.devices=user.role==='cashier'?db.prepare('SELECT id,created_at,last_seen_at FROM worker_devices WHERE user_id=? AND active=1 ORDER BY created_at DESC').all(user.id):db.prepare('SELECT id,name,created_at,last_seen_at FROM owner_devices WHERE user_id=? AND active=1 ORDER BY created_at DESC').all(user.id);
     return send(response,200,{users});
   }
@@ -1200,7 +1244,7 @@ async function api(request, response, url) {
     const username=username0.length>=3?username0:uniqueUsername(name);
     if(role==='owner'&&!isAdmin(actor.id))throw new HttpError(403,'Seul l’administrateur peut créer un compte propriétaire.');
     // one owner (the administrator) and one shared employee account per till
-    if (process.env.PROMEDPARA_ALLOW_MANY_ACCOUNTS !== '1' && db.prepare("SELECT 1 AS x FROM users WHERE role=? AND active=1").get(role)) throw new HttpError(409, role === 'owner' ? 'Cette caisse a un seul compte propriétaire (l’administrateur).' : 'Cette caisse a un seul compte employé. Changez son code PIN depuis Comptes équipe.');
+    if (role === 'owner' && process.env.PROMEDPARA_ALLOW_MANY_ACCOUNTS !== '1' && db.prepare("SELECT 1 AS x FROM users WHERE role='owner' AND active=1").get()) throw new HttpError(409, 'Cette caisse a un seul compte propriétaire (l’administrateur).');
     if(name.length<2||username.length<3||(password&&password.length<10))throw new HttpError(400,'Nom et identifiant (3+) requis; un mot de passe propriétaire doit contenir au moins 10 caractères.');
     const user={id:id('user'),name,username,role,password_hash:passwordHash(password||randomBytes(40).toString('base64url')),active:1,created_at:isoNow()};
     const askedPin = String(b.pin || '').trim();
