@@ -56,10 +56,47 @@ public final class MainActivity extends Activity {
         @Override public void onReceive(Context context, Intent intent) { if (intent != null && intent.getBooleanExtra("refresh", false)) loadDashboard(); }
     };
 
-    @Override protected void onPause() { super.onPause(); pausedAt = System.currentTimeMillis(); }
+    // ---- sign-in requests from the till: an owner opening the till must approve it here
+    private final android.os.Handler approvalHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean approvalDialogOpen;
+    private final Runnable approvalPoll = new Runnable() {
+        @Override public void run() {
+            if (unlocked && prefs != null && !approvalDialogOpen) {
+                io.execute(() -> {
+                    try {
+                        Result r = requestAuthed(prefs, "/api/login-approvals", "GET", null);
+                        if (r.status == 200) {
+                            org.json.JSONArray pending = new JSONObject(r.body).getJSONArray("pending");
+                            if (pending.length() > 0) { final JSONObject first = pending.getJSONObject(0); runOnUiThread(() -> askApproval(first.optString("id"), first.optString("name"))); }
+                        }
+                    } catch (Exception ignored) { /* offline: asked again in a few seconds */ }
+                });
+            }
+            approvalHandler.postDelayed(this, 4000);
+        }
+    };
+    private void askApproval(final String id, String name) {
+        if (approvalDialogOpen || isFinishing()) return;
+        approvalDialogOpen = true;
+        new android.app.AlertDialog.Builder(this).setTitle("Demande de connexion")
+            .setMessage(name + " veut ouvrir la caisse. Est-ce bien vous ?").setCancelable(false)
+            .setPositiveButton("Approuver", (d, w) -> answerApproval(id, "approve"))
+            .setNegativeButton("Refuser", (d, w) -> answerApproval(id, "refuse")).show();
+    }
+    private void answerApproval(final String id, final String decision) {
+        io.execute(() -> {
+            try {
+                Result r = requestAuthed(prefs, "/api/login-approvals/respond", "POST", new JSONObject().put("id", id).put("decision", decision).toString());
+                runOnUiThread(() -> { approvalDialogOpen = false; toast(r.status == 200 ? ("approve".equals(decision) ? "Connexion approuvée." : "Connexion refusée.") : "La demande a expiré."); });
+            } catch (Exception e) { runOnUiThread(() -> { approvalDialogOpen = false; toast(message(e)); }); }
+        });
+    }
+
+    @Override protected void onPause() { super.onPause(); pausedAt = System.currentTimeMillis(); approvalHandler.removeCallbacks(approvalPoll); }
     @Override protected void onResume() {
         super.onResume();
         if (prefs == null) return;
+        approvalHandler.removeCallbacks(approvalPoll); approvalHandler.postDelayed(approvalPoll, 1500);
         if (unlocked && pausedAt > 0 && System.currentTimeMillis() - pausedAt > 120000 && !prefs.getString("deviceToken", "").isEmpty()) { unlocked = false; pausedAt = 0; showUnlock(); return; }
         Updater.check(this, prefs.getString("server", ""), "PromedPara-Owner.apk");
     }

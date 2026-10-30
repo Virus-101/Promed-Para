@@ -269,6 +269,15 @@ const qrChallenges = new Map(), qrById = new Map();
 let ringTimes = [];
 const activePairingCodes = () => { const now = Date.now(); for (const [code, until] of livePairingCodes) if (until < now) livePairingCodes.delete(code); return Array.from(livePairingCodes.keys()); };
 let remoteLink = { enabled: false, connected: false, address: '' };
+let startRemote = () => {};
+
+// ---- security of this till: an owner signing in on the till itself can be made to approve it on their own phone
+const securityFile = path.join(DATA_DIR, 'security.json');
+const loadSecurity = () => { try { return JSON.parse(fs.readFileSync(securityFile, 'utf8')) || {}; } catch (error) { return {}; } };
+const saveSecurity = value => fs.writeFileSync(securityFile, JSON.stringify(value, null, 2));
+const loginApprovals = new Map();      // id -> { userId, name, wait, status, createdAt }
+const APPROVAL_MS = 120_000;
+const purgeApprovals = () => { const now = Date.now(); for (const [key, entry] of loginApprovals) if (now - entry.createdAt > APPROVAL_MS + 60_000) loginApprovals.delete(key); };
 const ownerUrls = () => ['127.0.0.1','localhost','::1'].includes(HOST) ? [] : Object.values(os.networkInterfaces()).flat().filter(item=>item?.family==='IPv4'&&!item.internal&&!item.address.startsWith('169.254.')).map(item=>`http://${item.address}:${PORT}`);
 const attemptWindows = new Map();
 let pinFailures = [];
@@ -441,6 +450,70 @@ async function api(request, response, url) {
     const token = randomBytes(32).toString('base64url'); sessions.set(token, { userId: owner.id, expires: Date.now() + 30 * 86400_000 });
     return send(response, 201, { user: userSafe(owner) }, { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 86400}` });
   }
+  const needsPhoneApproval = (user, request) => user.role === 'owner' && isLocal(request) && loadSecurity().phoneApproval === true && Boolean(db.prepare('SELECT 1 AS x FROM owner_devices WHERE user_id=? AND active=1').get(user.id));
+  const startApproval = (user, response) => {
+    purgeApprovals();
+    for (const [key, entry] of loginApprovals) if (entry.userId === user.id && entry.status === 'pending') loginApprovals.delete(key);
+    const approvalId = randomBytes(8).toString('hex'), wait = randomBytes(12).toString('hex');
+    loginApprovals.set(approvalId, { userId: user.id, name: user.name, wait: wait, status: 'pending', createdAt: Date.now() });
+    createNotification('Demande de connexion', user.name + ' veut ouvrir la caisse. Ouvrez l’application PromedPara Propriétaire et touchez Approuver.', 'approval');
+    return send(response, 202, { approval: { id: approvalId, wait: wait, expiresIn: APPROVAL_MS / 1000 } });
+  };
+  const approvalWait = /^\/api\/login-approvals\/([a-f0-9]{16})$/.exec(route);
+  if (approvalWait && request.method === 'GET') {
+    // the till's own sign-in screen asks until the phone answered
+    if (!isLocal(request)) throw new HttpError(403, 'Réservé à la caisse.');
+    const entry = loginApprovals.get(approvalWait[1]), wait = new URL(request.url, 'http://x').searchParams.get('wait') || '';
+    if (entry && Date.now() - entry.createdAt > APPROVAL_MS) loginApprovals.delete(approvalWait[1]);
+    if (!entry || entry.wait !== wait || Date.now() - entry.createdAt > APPROVAL_MS) throw new HttpError(410, 'La demande a expiré.');
+    if (entry.status === 'pending') return send(response, 200, { status: 'pending' });
+    loginApprovals.delete(approvalWait[1]);
+    if (entry.status !== 'approved') return send(response, 200, { status: 'refused' });
+    const approvedUser = db.prepare('SELECT id,name,username,role,can_receive_stock FROM users WHERE id=? AND active=1').get(entry.userId);
+    if (!approvedUser) throw new HttpError(410, 'Compte introuvable.');
+    return send(response, 200, { status: 'approved', user: userSafe(approvedUser) }, createSession(approvedUser));
+  }
+  if (route === '/api/login-approvals' && request.method === 'GET') {
+    const me = requireOwner(request);
+    if (isLocal(request)) throw new HttpError(403, 'L’approbation se fait sur le téléphone.');
+    purgeApprovals();
+    const pending = [];
+    for (const [key, entry] of loginApprovals) if (entry.userId === me.id && entry.status === 'pending' && Date.now() - entry.createdAt <= APPROVAL_MS) pending.push({ id: key, name: entry.name, at: entry.createdAt });
+    return send(response, 200, { pending });
+  }
+  if (route === '/api/login-approvals/respond' && request.method === 'POST') {
+    const me = requireOwner(request);
+    if (isLocal(request)) throw new HttpError(403, 'L’approbation se fait sur le téléphone, pas sur la caisse.');
+    const body = await readBody(request), entry = loginApprovals.get(String(body.id || ''));
+    if (!entry || entry.userId !== me.id || entry.status !== 'pending' || Date.now() - entry.createdAt > APPROVAL_MS) throw new HttpError(410, 'Cette demande a expiré.');
+    entry.status = body.decision === 'approve' ? 'approved' : 'refused';
+    createNotification(entry.status === 'approved' ? 'Connexion approuvée' : 'Connexion refusée', me.name + ' · depuis le téléphone', 'security');
+    return send(response, 200, { ok: true, status: entry.status });
+  }
+  if (route === '/api/security' && request.method === 'GET') {
+    const me = requireOwner(request), security = loadSecurity();
+    return send(response, 200, { phoneApproval: security.phoneApproval === true, phones: db.prepare('SELECT COUNT(*) AS n FROM owner_devices WHERE user_id=? AND active=1').get(me.id).n, link: { enabled: remoteLink.enabled, connected: remoteLink.connected }, isAdmin: isAdmin(me.id) });
+  }
+  if (route === '/api/security' && request.method === 'POST') {
+    const me = requireOwner(request), body = await readBody(request);
+    if (!isLocal(request)) throw new HttpError(403, 'Réservé à la caisse.');
+    if (!isAdmin(me.id)) throw new HttpError(403, 'Seul l’administrateur peut changer ces réglages.');
+    const security = loadSecurity();
+    if (typeof body.phoneApproval === 'boolean') {
+      if (body.phoneApproval && !db.prepare('SELECT 1 AS x FROM owner_devices WHERE user_id=? AND active=1').get(me.id)) throw new HttpError(400, 'Associez d’abord votre téléphone : sinon personne ne pourrait approuver.');
+      security.phoneApproval = body.phoneApproval; saveSecurity(security);
+      createNotification('Sécurité de la caisse', 'Approbation sur le téléphone ' + (body.phoneApproval ? 'activée' : 'désactivée') + ' · ' + me.name, 'security');
+    }
+    if (typeof body.phoneLink === 'boolean') {
+      const file = path.join(DATA_DIR, 'relay.json'); let cfg = {};
+      try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (error) { cfg = {}; }
+      cfg.enabled = body.phoneLink; fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+      try { remoteLink.stop(); } catch (error) { /* not running */ }
+      startRemote();
+      createNotification('Sécurité de la caisse', 'Lien internet des téléphones ' + (body.phoneLink ? 'activé' : 'désactivé') + ' · ' + me.name, 'security');
+    }
+    return send(response, 200, { phoneApproval: security.phoneApproval === true, phones: db.prepare('SELECT COUNT(*) AS n FROM owner_devices WHERE user_id=? AND active=1').get(me.id).n, link: { enabled: remoteLink.enabled, connected: remoteLink.connected }, isAdmin: true });
+  }
   if (route === '/api/login' && request.method === 'POST') {
     const body = await readBody(request);
     rateLimit(request, 'login', 15);
@@ -450,6 +523,7 @@ async function api(request, response, url) {
     let allowed = Boolean(user) && passwordMatches(secret, user.password_hash);
     if (!allowed && user && user.pin_hash && isLocal(request)) allowed = passwordMatches(secret, user.pin_hash);
     if (!allowed) throw new HttpError(401, 'Nom ou code incorrect.');
+    if (needsPhoneApproval(user, request)) return startApproval(user, response);
     const token = randomBytes(32).toString('base64url'); sessions.set(token, { userId: user.id, expires: Date.now() + 30 * 86400_000 });
     return send(response, 200, { user: userSafe(user) }, { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 86400}` });
   }
@@ -541,6 +615,7 @@ async function api(request, response, url) {
       throw new HttpError(401, 'Code PIN incorrect.');
     }
     pinFailures = [];
+    if (needsPhoneApproval(match, request)) return startApproval(match, response);
     return send(response, 200, { user: userSafe(match) }, createSession(match));
   }
   const pinMatch = route.match(/^\/api\/team\/([^/]+)\/pin$/);
@@ -1166,7 +1241,8 @@ server.listen(PORT,HOST,()=>{
     };
     setTimeout(watchStaged, Number(process.env.PROMEDPARA_STAGED_FIRST_MS) || 60000); const timer = setInterval(watchStaged, 10 * 60000); if (timer.unref) timer.unref();
   } catch (error) { console.error('update notices:', error.message); }
-  try { remoteLink = require('./relay-client').start({ dataDir: DATA_DIR, port: PORT, defaultUrl: process.env.PROMEDPARA_RELAY_URL !== undefined ? process.env.PROMEDPARA_RELAY_URL : RELAY_URL, activeCodes: activePairingCodes, ownerNames: () => { const names = []; for (const row of db.prepare("SELECT name,username FROM users WHERE role='owner' AND active=1").all()) names.push(row.name, row.username); return names; } }); } catch (error) { console.error('relay client:', error.message); }
+  startRemote = () => { try { remoteLink = require('./relay-client').start({ dataDir: DATA_DIR, port: PORT, defaultUrl: process.env.PROMEDPARA_RELAY_URL !== undefined ? process.env.PROMEDPARA_RELAY_URL : RELAY_URL, activeCodes: activePairingCodes, ownerNames: () => { const names = []; for (const row of db.prepare("SELECT name,username FROM users WHERE role='owner' AND active=1").all()) names.push(row.name, row.username); return names; } }); } catch (error) { console.error('relay client:', error.message); } };
+  startRemote();
   console.log(`PromedPara local service: http://localhost:${PORT}`);
   for(const entries of Object.values(os.networkInterfaces()))for(const item of entries||[])if(item.family==='IPv4'&&!item.internal)console.log(`Owner phone (same Wi-Fi): http://${item.address}:${PORT}`);
 });for (const signal of ['SIGINT','SIGTERM']) process.on(signal,()=>{server.close();db.close();process.exit(0)});
