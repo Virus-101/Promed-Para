@@ -14,7 +14,7 @@ const ok = (name, cond, extra) => { results.push(!!cond); console.log((cond ? 'P
 
 function start() {
   proc = spawn(path.join(KIT, 'runtime', 'node.exe'), ['main.js'], {
-    cwd: path.join(KIT, 'app'), env: Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA, PORT: String(PORT), HOST: '0.0.0.0' })
+    cwd: path.join(KIT, 'app'), env: Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA, PORT: String(PORT), HOST: '0.0.0.0', PROMEDPARA_ALLOW_MANY_ACCOUNTS: '1' })
   });
   proc.stderr.on('data', d => process.stderr.write('[server] ' + d));
   return new Promise(async (resolve, reject) => {

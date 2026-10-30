@@ -10,7 +10,7 @@ const PORT = 4197, BASE = 'http://127.0.0.1:' + PORT;
 let proc; const results = [];
 const ok = (name, cond, extra) => { results.push(!!cond); console.log((cond ? 'PASS ' : 'FAIL ') + name + (cond ? '' : '  -> ' + JSON.stringify(extra))); };
 const start = async () => {
-  proc = spawn(path.join(KIT, 'runtime', 'node.exe'), ['main.js'], { cwd: path.join(KIT, 'app'), env: Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA, PORT: String(PORT), HOST: '0.0.0.0' }) });
+  proc = spawn(path.join(KIT, 'runtime', 'node.exe'), ['main.js'], { cwd: path.join(KIT, 'app'), env: Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA, PORT: String(PORT), HOST: '0.0.0.0', PROMEDPARA_ALLOW_MANY_ACCOUNTS: '1' }) });
   for (let i = 0; i < 40; i++) { try { await fetch(BASE + '/api/status'); return; } catch (e) { await new Promise(r => setTimeout(r, 250)); } }
   throw new Error('server did not start');
 };

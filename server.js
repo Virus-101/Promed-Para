@@ -1170,6 +1170,8 @@ async function api(request, response, url) {
     const actor=requireOwner(request); const b=await readBody(request), name=clean(b.name,90), username0=clean(b.username,50).toLowerCase(), role=b.role==='owner'?'owner':'cashier', password=String(b.password||'');
     const username=username0.length>=3?username0:uniqueUsername(name);
     if(role==='owner'&&!isAdmin(actor.id))throw new HttpError(403,'Seul l’administrateur peut créer un compte propriétaire.');
+    // one owner (the administrator) and one shared employee account per till
+    if (process.env.PROMEDPARA_ALLOW_MANY_ACCOUNTS !== '1' && db.prepare("SELECT 1 AS x FROM users WHERE role=? AND active=1").get(role)) throw new HttpError(409, role === 'owner' ? 'Cette caisse a un seul compte propriétaire (l’administrateur).' : 'Cette caisse a un seul compte employé. Changez son code PIN depuis Comptes équipe.');
     if(name.length<2||username.length<3||(password&&password.length<10))throw new HttpError(400,'Nom et identifiant (3+) requis; un mot de passe propriétaire doit contenir au moins 10 caractères.');
     const user={id:id('user'),name,username,role,password_hash:passwordHash(password||randomBytes(40).toString('base64url')),active:1,created_at:isoNow()};
     const askedPin = String(b.pin || '').trim();
