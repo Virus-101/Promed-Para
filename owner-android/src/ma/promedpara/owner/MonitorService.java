@@ -59,12 +59,25 @@ public final class MonitorService extends Service {
                     final String version=name;
                     Updater.backgroundInstall(this,prefs.getString("server",""),new Updater.Listener(){
                         @Override public void needsTap(android.content.Intent confirm){confirmNotification(version,confirm);}
-                        @Override public void finished(boolean ok,String message){if(!ok)setStatus("Mise à jour "+version+" : nouvelle tentative plus tard");}
+                        @Override public void finished(boolean ok,String message){if(!ok){setStatus("Mise à jour "+version+" : nouvelle tentative plus tard");if(message!=null&&message.startsWith("Autorisation"))permissionNotification();}}
                     });
                 }
             }
             try{Thread.sleep(30*60000L);}catch(InterruptedException ignored){return;}
         }
+    }
+    /** Once: the phone must allow this app to install its own updates (Android setting), after which they download by themselves. */
+    private void permissionNotification(){
+        try{
+            if(prefs.getBoolean("installPermAsked",false))return;
+            prefs.edit().putBoolean("installPermAsked",true).apply();
+            android.content.Intent settings=new android.content.Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,android.net.Uri.parse("package:"+getPackageName()));
+            PendingIntent pending=PendingIntent.getActivity(this,78,settings,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+            NotificationManager m=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+            Notification.Builder n=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL_ALERTS):new Notification.Builder(this);
+            n.setSmallIcon(smallIcon()).setContentTitle("Autoriser les mises à jour automatiques").setContentText("Touchez, puis activez « Autoriser depuis cette source » : les prochaines mises à jour se téléchargeront toutes seules.").setContentIntent(pending).setAutoCancel(true);
+            m.notify(2998,n.build());
+        }catch(Exception ignored){}
     }
     /** Android sometimes insists on one confirmation: the notification carries that screen. */
     private void confirmNotification(String version,android.content.Intent confirm){
