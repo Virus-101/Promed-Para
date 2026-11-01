@@ -102,6 +102,7 @@ if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name ===
 if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'pin_hash')) {
   db.exec('ALTER TABLE users ADD COLUMN pin_hash TEXT');
 }
+db.exec(`CREATE TABLE IF NOT EXISTS shift_reports (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_name TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT NOT NULL, tickets INTEGER NOT NULL, items REAL NOT NULL, total_cents INTEGER NOT NULL, lines TEXT NOT NULL)`);
 db.exec(`CREATE TABLE IF NOT EXISTS unknown_scans (code TEXT PRIMARY KEY, scans INTEGER NOT NULL DEFAULT 1, first_at TEXT NOT NULL, last_at TEXT NOT NULL)`);
 db.exec(`CREATE TABLE IF NOT EXISTS owner_devices (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE,
@@ -799,9 +800,11 @@ async function api(request, response, url) {
     const rows = sinceMs
       ? db.prepare('SELECT id,total_cents,created_at FROM sales WHERE cashier_id=? AND created_at>=? ORDER BY created_at').all(userId, new Date(sinceMs).toISOString())
       : db.prepare('SELECT id,total_cents,created_at FROM sales WHERE cashier_id=? AND created_at>=? ORDER BY created_at').all(userId, new Date(Date.now() - 36 * 3600_000).toISOString()).filter(row => shopDay(new Date(row.created_at)) === today);
-    let items = 0;
-    for (const row of rows) items += Number(db.prepare('SELECT COALESCE(SUM(qty),0) AS n FROM sale_lines WHERE sale_id=?').get(row.id).n) || 0;
-    return { day: today, since: sinceMs ? new Date(sinceMs).toISOString() : '', tickets: rows.length, totalCents: rows.reduce((sum, row) => sum + row.total_cents, 0), items: items, first: rows.length ? rows[0].created_at : '', last: rows.length ? rows[rows.length - 1].created_at : '' };
+    let items = 0; const lines = [];
+    for (const row of rows) {
+      for (const line of db.prepare('SELECT name,qty,unit,line_total_cents FROM sale_lines WHERE sale_id=? ORDER BY rowid').all(row.id)) { items += Number(line.qty) || 0; lines.push({ at: row.created_at, name: line.name, qty: line.qty, unit: line.unit, totalCents: line.line_total_cents }); }
+    }
+    return { day: today, since: sinceMs ? new Date(sinceMs).toISOString() : '', lines: lines.slice(0, 400), tickets: rows.length, totalCents: rows.reduce((sum, row) => sum + row.total_cents, 0), items: items, first: rows.length ? rows[0].created_at : '', last: rows.length ? rows[rows.length - 1].created_at : '' };
   };
   if (route === '/api/mobile/products' && request.method === 'GET') {
     requireOwner(request);
@@ -821,13 +824,19 @@ async function api(request, response, url) {
     const count = clause => db.prepare('SELECT COUNT(*) AS n FROM products WHERE active=1 AND ' + clause).get().n;
     return send(response, 200, { total, offset, items, counts: { all: count('1=1'), low: count(wheres.low), out: count(wheres.out), review: count(wheres.review) } });
   }
+  if (route === '/api/mobile/shifts' && request.method === 'GET') {
+    requireOwner(request);
+    const limit = Math.min(30, Math.max(1, Number(url.searchParams.get('limit')) || 10));
+    const reports = db.prepare('SELECT id,user_name,started_at,ended_at,tickets,items,total_cents,lines FROM shift_reports ORDER BY ended_at DESC LIMIT ?').all(limit).map(r => ({ id: r.id, name: r.user_name, startedAt: r.started_at, endedAt: r.ended_at, tickets: r.tickets, items: r.items, totalCents: r.total_cents, lines: (() => { try { return JSON.parse(r.lines); } catch (e) { return []; } })() }));
+    return send(response, 200, { reports });
+  }
   if (route === '/api/me/shift' && request.method === 'GET') {
     const me = requireUser(request), mine = sessions.get(cookieToken(request));
     return send(response, 200, shiftOf(me.id, mine && mine.createdAt));
   }
   if (route === '/api/logout' && request.method === 'POST') {
     const ending = sessions.get(cookieToken(request)), who = ending && db.prepare('SELECT name,role FROM users WHERE id=?').get(ending.userId);
-    if (who && who.role === 'cashier') { const day = shiftOf(ending.userId, ending.createdAt); createNotification('Employé déconnecté', `${who.name} · a fermé la caisse · ${day.tickets} ticket(s), ${(day.totalCents / 100).toFixed(2).replace('.', ',')} MAD pendant sa session`, 'staff'); }
+    if (who && who.role === 'cashier') { const day = shiftOf(ending.userId, ending.createdAt); const started = ending.createdAt ? new Date(ending.createdAt).toISOString() : (day.since || isoNow()); db.prepare('INSERT INTO shift_reports(id,user_id,user_name,started_at,ended_at,tickets,items,total_cents,lines) VALUES(?,?,?,?,?,?,?,?,?)').run(id('shift'), ending.userId, who.name, started, isoNow(), day.tickets, day.items, day.totalCents, JSON.stringify(day.lines)); db.prepare("DELETE FROM shift_reports WHERE ended_at < ?").run(new Date(Date.now() - 120 * 86400_000).toISOString()); createNotification('Employé déconnecté', `${who.name} · a fermé la caisse · ${day.tickets} ticket(s), ${(day.totalCents / 100).toFixed(2).replace('.', ',')} MAD pendant sa session · détail de chaque produit vendu dans « Fins de journée »`, 'staff'); }
     sessions.delete(cookieToken(request));
     return send(response, 200, { ok: true }, { 'Set-Cookie': 'pp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
   }

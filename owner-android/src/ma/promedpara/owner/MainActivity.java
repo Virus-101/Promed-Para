@@ -441,6 +441,7 @@ public final class MainActivity extends Activity {
         LinearLayout quick=row(); LinearLayout.LayoutParams qk=lp(-1,-2); qk.topMargin=dp(10); area.addView(quick,qk);
         Button lowBtn=button("Stock bas",false,"triangle_alert",()->showProducts("low")); LinearLayout.LayoutParams lb=new LinearLayout.LayoutParams(0,dp(52),1); lb.setMargins(0,0,dp(5),0); quick.addView(lowBtn,lb);
         Button reviewBtn=button("À réviser",false,"shield_check",()->showProducts("review")); LinearLayout.LayoutParams rv=new LinearLayout.LayoutParams(0,dp(52),1); rv.setMargins(dp(5),0,0,0); quick.addView(reviewBtn,rv);
+        Button shiftsBtn=button("Fins de journée des employés",false,"clock",this::showShifts); LinearLayout.LayoutParams shp=lp(-1,52); shp.topMargin=dp(10); area.addView(shiftsBtn,shp);
         addSection(area,"STOCK À SURVEILLER","triangle_alert",lowStockText(data.optJSONArray("lowStock")));
         addSection(area,"FOURNISSEURS","truck",suppliersText(currentSuppliers));
         addSection(area,"ACTIVITÉ RÉCENTE","receipt",notificationsText(data.optJSONArray("notifications")));
@@ -474,6 +475,50 @@ public final class MainActivity extends Activity {
 
     private void loadDashboard() {
         io.execute(() -> {try{Result r=requestAuthed(prefs,"/api/overview","GET",null);if(r.status==401||r.status==403){runOnUiThread(this::showUnlock);return;}JSONObject j=new JSONObject(r.body);if(r.status<200||r.status>=300)throw new Exception(j.optString("error","Chargement impossible."));JSONArray suppliers=null;try{Result sr=requestAuthed(prefs,"/api/suppliers","GET",null);if(sr.status>=200&&sr.status<300)suppliers=new JSONObject(sr.body).optJSONArray("suppliers");}catch(Exception ignored){}JSONArray finalSuppliers=suppliers;runOnUiThread(()->{currentSuppliers=finalSuppliers;showDashboard(j);});}catch(Exception e){runOnUiThread(()->toast("Connexion au poste impossible. Vérifiez le Wi‑Fi puis actualisez."));}});
+    }
+
+    // ---- each employee's sign-out report: every product with the time it was sold
+    private void showShifts() {
+        begin("Propriétaire", "Fins de journée", "Ce que chaque employé a vendu entre sa connexion et sa déconnexion, produit par produit.", false);
+        LinearLayout area = column(); pad(area, 16, 14, 16, 28); root.addView(area);
+        Button back = button("Retour au tableau de bord", false, null, this::loadDashboard); area.addView(back, lp(-1, 50));
+        final TextView info = text("Chargement…", 13, MUTED, false); info.setPadding(0, dp(12), 0, dp(6)); area.addView(info);
+        final LinearLayout list = column(); area.addView(list);
+        io.execute(() -> {
+            try {
+                Result r = requestAuthed(prefs, "/api/mobile/shifts?limit=15", "GET", null);
+                if (r.status != 200) throw new Exception(new JSONObject(r.body).optString("error", "Liste indisponible."));
+                final org.json.JSONArray reports = new JSONObject(r.body).getJSONArray("reports");
+                runOnUiThread(() -> {
+                    info.setText(reports.length() == 0 ? "Aucune fin de journée enregistrée pour le moment." : reports.length() + " dernière(s) fin(s) de journée · touchez-en une pour voir l’heure de chaque produit.");
+                    for (int i = 0; i < reports.length(); i++) list.addView(shiftCard(reports.optJSONObject(i)));
+                });
+            } catch (Exception e) { runOnUiThread(() -> info.setText(message(e))); }
+        });
+    }
+    private String clock(String iso) {
+        try { java.text.SimpleDateFormat in = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.ROOT); in.setTimeZone(java.util.TimeZone.getTimeZone("UTC")); java.util.Date d = in.parse(iso.substring(0, 19)); return new java.text.SimpleDateFormat("HH:mm", java.util.Locale.FRANCE).format(d); } catch (Exception e) { return ""; }
+    }
+    private String dayOf(String iso) {
+        try { java.text.SimpleDateFormat in = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.ROOT); in.setTimeZone(java.util.TimeZone.getTimeZone("UTC")); java.util.Date d = in.parse(iso.substring(0, 19)); return new java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.FRANCE).format(d); } catch (Exception e) { return ""; }
+    }
+    private View shiftCard(final JSONObject report) {
+        LinearLayout card = column(); pad(card, 14, 12, 14, 12); card.setBackground(shape(Color.WHITE, LINE, 13));
+        LinearLayout.LayoutParams cp = lp(-1, -2); cp.topMargin = dp(8); card.setLayoutParams(cp);
+        LinearLayout top = row(); card.addView(top);
+        top.addView(text(report.optString("name"), 15, INK, true), new LinearLayout.LayoutParams(0, -2, 1));
+        top.addView(text(money(report.optLong("totalCents")), 15, INK, true));
+        card.addView(text(dayOf(report.optString("endedAt")) + " · " + clock(report.optString("startedAt")) + " → " + clock(report.optString("endedAt")) + " · " + report.optInt("tickets") + " ticket(s)", 12, MUTED, false));
+        card.setOnClickListener(v -> {
+            StringBuilder sb = new StringBuilder(); org.json.JSONArray lines = report.optJSONArray("lines");
+            for (int i = 0; lines != null && i < lines.length(); i++) {
+                JSONObject l = lines.optJSONObject(i); double qty = l.optDouble("qty", 1);
+                sb.append(clock(l.optString("at"))).append("   ").append(l.optString("name")).append(qty == 1 ? "" : "  × " + (qty == Math.rint(qty) ? String.valueOf((long) qty) : String.valueOf(qty))).append("   ").append(money(l.optLong("totalCents"))).append("\n");
+            }
+            if (sb.length() == 0) sb.append("Aucune vente pendant cette session.");
+            new android.app.AlertDialog.Builder(this).setTitle(report.optString("name") + " · " + money(report.optLong("totalCents"))).setMessage(sb.toString()).setPositiveButton("Fermer", null).show();
+        });
+        return card;
     }
 
     // ---- the whole catalogue on the phone: search, low stock, products to review
