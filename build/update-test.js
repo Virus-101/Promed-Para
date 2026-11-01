@@ -130,7 +130,7 @@ function makeKit(version, tweak) {
   publish(auto); await updater.check('test'); ok('next release is staged', st().staged === '9.1.3', st());
   const api = (m, u, b, cookie) => fetch('http://127.0.0.1:' + PORT + u, { method: m, headers: Object.assign({ 'Content-Type': 'application/json' }, cookie ? { Cookie: cookie } : {}), body: b ? JSON.stringify(b) : undefined });
   const su = await api('POST', '/api/setup', { name: 'Test Owner', username: 'owner', password: 'correct-horse-9' }); const cookie = su.headers.get('set-cookie').split(';')[0];
-  await api('GET', '/api/products', null, cookie);   // a real action by a signed-in user = the till is in use right now
+  await api('POST', '/api/products', { name: 'Produit test', price: 5, quantity: 3, category: 'Test', cost: 1, reorderLevel: 1, barcode: '' }, cookie);   // a real action by a signed-in user = the till is in use right now
   await updater.tick(); await sleep(2500);
   ok('NOT installed while the till was just used', (await status()).version === installed && st().staged === '9.1.3', await status());
   await sleep(7000);

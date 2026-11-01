@@ -215,7 +215,7 @@ const requireUser = request => {
   if (!user || !user.active) throw new HttpError(401, 'Connectez-vous pour continuer.');
   // a phone that only proved its device token (no personal code) may receive alerts, nothing else
   if (user.scope === 'alerts' && !/^\/api\/(notifications|events|me|logout|owner\/)/.test(String(request.url || '').split('?')[0])) throw new HttpError(403, 'Entrez votre code personnel dans l’application pour voir les données.');
-  lastActivityAt = Date.now();
+  if (request.method !== 'GET') lastActivityAt = Date.now();   // the screens poll in the background: only real actions (a sale, a sign-in…) count as use
   return user;
 };
 const requireOwner = request => {

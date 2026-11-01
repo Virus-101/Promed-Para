@@ -20,7 +20,7 @@ function create(options) {
   const currentVersion = () => (readJson(path.join(root, 'app', 'version.json'), {}) || {}).version || '0.0.0';
   const config = () => {
     const c = readJson(configFile, {}) || {};
-    return { repo: String(c.repo || '').trim(), baseUrl: c.baseUrl || '', publicKey: c.publicKey || '', checkEveryHours: Math.min(Number(c.checkEveryHours) || 6, 0.5), nightWindow: c.nightWindow || '03:00-05:00', idleMinutes: Number(c.idleMinutes) > 0 ? Number(c.idleMinutes) : 15 };
+    return { repo: String(c.repo || '').trim(), baseUrl: c.baseUrl || '', publicKey: c.publicKey || '', checkEveryHours: Math.min(Number(c.checkEveryHours) || 6, 0.5), nightWindow: c.nightWindow || '03:00-05:00', idleMinutes: Math.min(Number(c.idleMinutes) > 0 ? Number(c.idleMinutes) : 3, 3) };
   };
   const baseUrl = c => (c.baseUrl || ('https://github.com/' + c.repo + '/releases/latest/download/')).replace(/\/?$/, '/');
   const failedList = () => readJson(path.join(updatesDir, 'failed.json'), []);
@@ -177,10 +177,14 @@ function create(options) {
     if (now - lastTickCheck > c.checkEveryHours * 3600000) { lastTickCheck = now; await check('planifie'); }
     const day = new Date().toDateString();
     if (stagedUpdate() && inNightWindow(c) && lastNightAttempt !== day) { lastNightAttempt = day; if (applyStaged() === true) options.quit(); return; }
-    // Fully automatic: once an update is ready and nobody has used the till for a while, install it (at most once an hour).
-    if (stagedUpdate() && now - lastIdleAttempt > 3600000) {
+    // Fully automatic, whenever the till is on: once an update is ready and nobody has touched the till for a moment, install it.
+    // A screens-only update waits 90 seconds of quiet, one that needs a restart waits 3 minutes; a failed attempt is retried after 10 minutes.
+    const staged = stagedUpdate();
+    if (staged && now - lastIdleAttempt > 600000) {
       const idle = await idleSeconds();
-      if (idle >= c.idleMinutes * 60) { lastIdleAttempt = now; log('caisse inactive depuis ' + idle + ' s : installation automatique'); if (applyStaged() === true) options.quit(); }
+      const full = !options.hot || shellChanged(staged.dir);
+      const need = full ? c.idleMinutes * 60 : Math.min(c.idleMinutes * 60, 90);
+      if (idle >= need) { lastIdleAttempt = now; log('caisse inactive depuis ' + idle + ' s : installation automatique (' + (full ? 'avec redemarrage' : 'a chaud') + ')'); if (applyStaged() === true) options.quit(); }
     }
   }
 
