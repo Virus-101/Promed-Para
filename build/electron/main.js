@@ -162,7 +162,7 @@ app.whenReady().then(async () => {
   let updater = null;
   if (!process.env.PROMEDPARA_NO_UPDATER) {
     try {
-      updater = require('./updater').create({ root: ROOT, dataDir: DATA_DIR, port: PORT, log, quit: () => app.exit(0) });
+      updater = require('./updater').create({ root: ROOT, dataDir: DATA_DIR, port: PORT, log, hot: true, quit: () => app.exit(0), reload: () => { try { if (win && !win.isDestroyed()) win.webContents.reloadIgnoringCache(); } catch (e) { /* the window is closing */ } } });
       // An update downloaded earlier is installed now, before the cashier opens.
       if (updater.applyAtStart()) { log('installation d une mise a jour au demarrage'); if (win) win.loadURL(splash('Mise &agrave; jour de PromedPara : installation en cours, la caisse red&eacute;marre dans un instant&hellip;')); setTimeout(() => app.exit(0), 1500); return; }
     } catch (e) { log('updater indisponible: ' + e.message); updater = null; }

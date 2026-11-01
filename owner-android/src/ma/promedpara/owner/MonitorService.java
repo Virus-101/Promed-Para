@@ -52,12 +52,29 @@ public final class MonitorService extends Service {
         try{Thread.sleep(20000);}catch(InterruptedException ignored){return;}
         while(running&&prefs.getBoolean("monitoring",false)){
             String name=Updater.latest(this,prefs.getString("server",""));
-            if(name!=null&&!name.isEmpty()&&!name.equals(prefs.getString("announcedUpdate",""))){
-                prefs.edit().putString("announcedUpdate",name).apply();
-                alert("Mise à jour de PromedPara disponible","Version "+name+" : touchez pour ouvrir l’application, puis « Installer ». Vos données et votre association sont conservées.",System.currentTimeMillis());
+            if(name!=null&&!name.isEmpty()){
+                int tries=prefs.getInt("bgTries_"+name,0);
+                if(tries<5){
+                    prefs.edit().putInt("bgTries_"+name,tries+1).apply();
+                    final String version=name;
+                    Updater.backgroundInstall(this,prefs.getString("server",""),new Updater.Listener(){
+                        @Override public void needsTap(android.content.Intent confirm){confirmNotification(version,confirm);}
+                        @Override public void finished(boolean ok,String message){if(!ok)setStatus("Mise à jour "+version+" : nouvelle tentative plus tard");}
+                    });
+                }
             }
-            try{Thread.sleep(4*3600000L);}catch(InterruptedException ignored){return;}
+            try{Thread.sleep(30*60000L);}catch(InterruptedException ignored){return;}
         }
+    }
+    /** Android sometimes insists on one confirmation: the notification carries that screen. */
+    private void confirmNotification(String version,android.content.Intent confirm){
+        try{
+            NotificationManager m=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+            PendingIntent pending=PendingIntent.getActivity(this,77,confirm,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_MUTABLE);
+            Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL_ALERTS):new Notification.Builder(this);
+            b.setSmallIcon(smallIcon()).setContentTitle("Mise à jour de PromedPara prête").setContentText("Version "+version+" téléchargée : touchez pour l’installer (une seule confirmation).").setContentIntent(pending).setAutoCancel(true);
+            m.notify(2999,b.build());
+        }catch(Exception ignored){}
     }
     private void watchRelay(){
         while(running&&prefs.getBoolean("monitoring",false)){

@@ -40,7 +40,7 @@ function create(options) {
     const previous = readJson(statusFile, {}) || {};
     const next = Object.assign({}, previous, patch, {
       current: currentVersion(), enabled: !!(c.repo || c.baseUrl) && !!c.publicKey, repo: c.repo, nightWindow: c.nightWindow,
-      staged: staged ? staged.version : null, saved: savedVersions(), failed: failedList(), updatedAt: new Date().toISOString()
+      staged: staged ? staged.version : null, needsRestart: staged ? shellChanged(staged.dir) : false, saved: savedVersions(), failed: failedList(), updatedAt: new Date().toISOString()
     });
     const applied = readJson(path.join(updatesDir, 'last-apply.json'), null);
     if (applied) next.lastApply = applied;
@@ -99,14 +99,47 @@ function create(options) {
     fs.mkdirSync(path.join(root, 'logs'), { recursive: true });
     const out = fs.openSync(path.join(root, 'logs', 'update.log'), 'a');
     const testing = !!process.env.PROMEDPARA_APPLY_TEST;
-    const args = [path.join(tmp, 'apply-update.js'), '--root=' + root, '--data=' + dataDir, '--port=' + port].concat(testing ? ['--test=1', '--health=20'] : ['--pid=' + process.pid]).concat(extra);
+    const hot = extra.indexOf('--mode=hot') >= 0;
+    const args = [path.join(tmp, 'apply-update.js'), '--root=' + root, '--data=' + dataDir, '--port=' + port].concat(testing ? ['--test=1', '--health=20'] : (hot ? [] : ['--pid=' + process.pid])).concat(extra);
     const child = spawn(node, args, { detached: true, stdio: ['ignore', out, out], windowsHide: true });
     child.unref();
     log('assistant de mise a jour lance: ' + extra.join(' '));
   }
-  function applyStaged() {
+  // Files of the app shell (window, preload, updater): when none changed, the update only needs the server and the screens swapped.
+  function shellChanged(dir) {
+    try {
+      const staged = path.join(dir, 'electron', 'resources', 'app'), live = path.join(root, 'electron', 'resources', 'app');
+      if (!fs.existsSync(staged)) return false;
+      const list = base => { const out = []; (function walk(d) { for (const n of fs.readdirSync(d)) { const f = path.join(d, n); if (fs.statSync(f).isDirectory()) walk(f); else out.push(path.relative(base, f)); } })(base); return out.sort(); };
+      const a = list(staged), b = list(live);
+      if (a.join('|') !== b.join('|')) return true;
+      for (const rel of a) if (core.sha256(fs.readFileSync(path.join(staged, rel))) !== core.sha256(fs.readFileSync(path.join(live, rel)))) return true;
+      return false;
+    } catch (e) { return true; }
+  }
+  function watchHot(version) {
+    let tries = 0;
+    const timer = setInterval(() => {
+      const req = require('http').get({ host: '127.0.0.1', port, path: '/api/status', timeout: 1500 }, res => {
+        let body = ''; res.on('data', d => { body += d; });
+        res.on('end', () => {
+          let v = ''; try { v = JSON.parse(body).version; } catch (e) { /* not up yet */ }
+          if (v === version || ++tries > 100) { clearInterval(timer); log(v === version ? 'mise a jour a chaud ' + version + ' en service' : 'mise a jour a chaud: retour a la version precedente'); setStatus({}); if (options.reload) options.reload(); }
+        });
+      });
+      req.on('error', () => { if (++tries > 100) { clearInterval(timer); if (options.reload) options.reload(); } });
+      req.on('timeout', () => req.destroy());
+    }, 700);
+  }
+  // returns true (full restart needed: the caller quits the app), 'hot' (server and screens swapped, window refreshes itself) or false
+  function applyStaged(forceFull) {
     const staged = stagedUpdate();
     if (!staged) return false;
+    if (options.hot && !forceFull && !shellChanged(staged.dir)) {
+      spawnHelper(['--mode=hot', '--version=' + staged.version, '--source=' + staged.dir, '--exe=' + process.execPath]);
+      watchHot(staged.version);
+      return 'hot';
+    }
     spawnHelper(['--mode=apply', '--version=' + staged.version, '--source=' + staged.dir]);
     return true;
   }
@@ -137,23 +170,23 @@ function create(options) {
       try { fs.unlinkSync(commandFile); } catch (e) { /* ignore */ }
       log('commande: ' + JSON.stringify(cmd));
       if (cmd.action === 'check') await check('manuel');
-      else if (cmd.action === 'apply') { if (!stagedUpdate()) await check('avant installation'); if (applyStaged()) { options.quit(); return; } }
+      else if (cmd.action === 'apply') { if (!stagedUpdate()) await check('avant installation'); const r = applyStaged(); if (r === true) { options.quit(); return; } if (r === 'hot') return; }
       else if (cmd.action === 'rollback') { if (rollbackTo(cmd.version)) { options.quit(); return; } }
     }
     const c = config(), now = Date.now();
     if (now - lastTickCheck > c.checkEveryHours * 3600000) { lastTickCheck = now; await check('planifie'); }
     const day = new Date().toDateString();
-    if (stagedUpdate() && inNightWindow(c) && lastNightAttempt !== day) { lastNightAttempt = day; if (applyStaged()) options.quit(); return; }
+    if (stagedUpdate() && inNightWindow(c) && lastNightAttempt !== day) { lastNightAttempt = day; if (applyStaged() === true) options.quit(); return; }
     // Fully automatic: once an update is ready and nobody has used the till for a while, install it (at most once an hour).
     if (stagedUpdate() && now - lastIdleAttempt > 3600000) {
       const idle = await idleSeconds();
-      if (idle >= c.idleMinutes * 60) { lastIdleAttempt = now; log('caisse inactive depuis ' + idle + ' s : installation automatique'); if (applyStaged()) options.quit(); }
+      if (idle >= c.idleMinutes * 60) { lastIdleAttempt = now; log('caisse inactive depuis ' + idle + ' s : installation automatique'); if (applyStaged() === true) options.quit(); }
     }
   }
 
   return {
     // Called before the cashier window opens: an already downloaded update is installed right away.
-    applyAtStart() { return applyStaged(); },
+    applyAtStart() { return applyStaged(true); },
     start() { housekeeping(); setStatus({}); setTimeout(() => { lastTickCheck = Date.now(); check('demarrage'); }, 20000); setInterval(() => { tick().catch(e => log('tick: ' + e.message)); }, 10000); },
     check, applyStaged, rollbackTo, setStatus, tick, housekeeping
   };

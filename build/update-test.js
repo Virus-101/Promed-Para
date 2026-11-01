@@ -137,6 +137,28 @@ function makeKit(version, tweak) {
   await updater.tick();
   ok('installed automatically after the idle time, with nobody pressing anything', await waitVersion('9.1.3', 60), await status());
 
+  // --- hot update: server and screens swapped, the app window (shell) is never closed
+  const hotReloads = [];
+  const hotUpdater = create({ root: ROOT, dataDir: DATA, port: PORT, log: m => logs.push(m), quit: () => {}, hot: true, reload: () => hotReloads.push(Date.now()) });
+  const shellFile = path.join(ROOT, 'electron', 'resources', 'app', 'main.js'), shellHash = () => core.sha256(fs.readFileSync(shellFile));
+  const hotRel = path.join(T, 'rel-hot'); createRelease({ kitDir: makeKit('9.2.0', d => fs.writeFileSync(path.join(d, 'app', 'public', 'hot-feature.txt'), 'hot')), outDir: hotRel, version: '9.2.0' });
+  publish(hotRel); await hotUpdater.check('test');
+  ok('a screens-only release is staged and says it needs no restart', st().staged === '9.2.0' && st().needsRestart === false, st());
+  const before = shellHash();
+  ok('applying it takes the hot way', hotUpdater.applyStaged() === 'hot');
+  ok('the new version comes up', await waitVersion('9.2.0', 60), await status());
+  ok('the new files are in place', fs.existsSync(path.join(ROOT, 'app', 'public', 'hot-feature.txt')));
+  for (let i = 0; i < 60 && !hotReloads.length; i++) await sleep(250);
+  ok('the window is told to refresh itself, once', hotReloads.length === 1, hotReloads);
+  ok('the app shell files were not touched', shellHash() === before);
+  ok('the data and the sign-ins survived the hot update', fs.existsSync(path.join(DATA, 'sessions.json')) && fs.existsSync(path.join(DATA, 'marker.txt')));
+  // a release that changes the shell itself must ask for the full restart
+  const shellRel = path.join(T, 'rel-shell'); createRelease({ kitDir: makeKit('9.2.1', d => fs.appendFileSync(path.join(d, 'electron', 'resources', 'app', 'main.js'), '\n// shell change')), outDir: shellRel, version: '9.2.1' });
+  publish(shellRel); await hotUpdater.check('test');
+  ok('a release that changes the shell says it needs a restart', st().staged === '9.2.1' && st().needsRestart === true, st());
+  ok('applying it asks for the full restart (the caller quits the app)', hotUpdater.applyStaged() === true);
+  ok('and it still comes up', await waitVersion('9.2.1', 60), await status());
+
   stopServer(); web.close();
   await sleep(500);
   try { core.rimraf(T); } catch (e) { /* ignore */ }

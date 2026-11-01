@@ -13,7 +13,8 @@ for (const a of process.argv.slice(2)) { const m = /^--([a-z-]+)=(.*)$/.exec(a);
 const ROOT = args.root;
 const PORT = Number(args.port || 4173);
 const DATA_DIR = args.data || path.join(ROOT, 'data');
-const MODE = args.mode || 'apply';               // apply | rollback
+const MODE = args.mode || 'apply';               // apply | rollback | hot (server and screens only: the window stays open)
+const HOT = MODE === 'hot';
 const TARGET = args.version;                      // version we expect to be running afterwards
 const SOURCE = args.source;                       // staged dir (apply) or versions/<v> dir (rollback)
 const HEALTH_SECONDS = Number(args.health || 90);
@@ -56,7 +57,17 @@ async function renameRetry(from, to) {
     try { fs.renameSync(from, to); return; } catch (e) { if (i === 19) throw e; await sleep(500); }
   }
 }
+function launchServer() {
+  const logs = path.join(ROOT, 'logs'); core.mkdirp(logs);
+  const out = fs.openSync(path.join(logs, 'serveur.log'), 'a'), err = fs.openSync(path.join(logs, 'serveur-erreurs.log'), 'a');
+  const env = Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA_DIR, PORT: String(PORT), HOST: TEST ? '127.0.0.1' : '0.0.0.0' });
+  if (args.exe) env.PROMEDPARA_EXE = args.exe;
+  delete env.ELECTRON_RUN_AS_NODE;
+  const child = cp.spawn(path.join(ROOT, 'runtime', 'node.exe'), ['main.js'], { cwd: path.join(ROOT, 'app'), env, detached: true, stdio: ['ignore', out, err], windowsHide: true });
+  child.unref();
+}
 function launchApp() {
+  if (HOT) { launchServer(); return; }
   if (TEST) {
     const env = Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA_DIR, PORT: String(PORT), HOST: '127.0.0.1' });
     const child = cp.spawn(path.join(ROOT, 'runtime', 'node.exe'), ['main.js'], { cwd: path.join(ROOT, 'app'), env, detached: true, stdio: 'ignore', windowsHide: true });
@@ -116,7 +127,7 @@ function recordFailure(version, message) {
 async function main() {
   core.mkdirp(path.join(ROOT, 'updates'));
   log('=== ' + MODE + ' vers ' + TARGET + ' (source ' + SOURCE + ')');
-  if (args.pid) { for (let i = 0; i < 60 && pidAlive(Number(args.pid)); i++) await sleep(500); }
+  if (args.pid && !HOT) { for (let i = 0; i < 60 && pidAlive(Number(args.pid)); i++) await sleep(500); }
   await stopServer();
   const current = versionOf(path.join(ROOT, 'app'));
   log('version actuelle ' + current);
@@ -124,7 +135,9 @@ async function main() {
   // Source folders: staged update (kit-relative layout) or a saved version (flat layout)
   const sources = MODE === 'rollback'
     ? { app: path.join(SOURCE, 'app'), shell: path.join(SOURCE, 'shell'), tools: path.join(SOURCE, 'tools') }
-    : { app: path.join(SOURCE, 'app'), shell: path.join(SOURCE, 'electron', 'resources', 'app'), tools: path.join(SOURCE, 'tools') };
+    : HOT
+      ? { app: path.join(SOURCE, 'app'), tools: path.join(SOURCE, 'tools') }
+      : { app: path.join(SOURCE, 'app'), shell: path.join(SOURCE, 'electron', 'resources', 'app'), tools: path.join(SOURCE, 'tools') };
   for (const k of Object.keys(sources)) if (!fs.existsSync(sources[k])) delete sources[k];
   if (!sources.app) throw new Error('dossier app absent dans la source');
   if (versionOf(sources.app) !== TARGET) throw new Error('la source ne contient pas la version ' + TARGET);
@@ -150,7 +163,7 @@ async function main() {
     return 1;
   }
   fs.writeFileSync(path.join(ROOT, 'updates', 'last-apply.json'), JSON.stringify({ ok: true, version: TARGET, previous: current, at: new Date().toISOString(), mode: MODE }));
-  if (MODE !== 'rollback') { try { core.rimraf(SOURCE); } catch (e) { /* ignore */ } }
+  if (MODE !== 'rollback') { try { core.rimraf(SOURCE); } catch (e) { /* ignore */ } }   // (hot or full: the staged copy is no longer needed)
   try { fs.rmdirSync(path.join(ROOT, 'versions', TARGET)); } catch (e) { /* not empty or absent */ }
   core.housekeeping(ROOT, { keepVersions: KEEP_VERSIONS, current: TARGET, log });
   log('OK version ' + TARGET + ' en service (precedente conservee: ' + current + ')');

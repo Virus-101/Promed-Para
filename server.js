@@ -841,7 +841,7 @@ async function api(request, response, url) {
     let status = {};
     try { status = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'update-status.json'), 'utf8')); } catch { /* not written yet */ }
     const policy = loadUpdatePolicy(), mandatory = Boolean(status.staged && policy.mandatory === true && policy.version === status.staged);
-    if (viewer.role !== 'owner') return send(response, 200, { current: APP_VERSION, staged: status.staged || '', lastCheck: status.lastCheck || '', message: status.message || '', mandatory });
+    if (viewer.role !== 'owner') return send(response, 200, { current: APP_VERSION, staged: status.staged || '', lastCheck: status.lastCheck || '', message: status.message || '', mandatory, needsRestart: status.needsRestart === true });
     return send(response, 200, Object.assign({ enabled: false, current: APP_VERSION, saved: [] }, status, { current: APP_VERSION, mandatory }));
   }
   if (route === '/api/update/policy' && request.method === 'POST') {

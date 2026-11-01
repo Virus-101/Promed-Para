@@ -38,6 +38,52 @@ final class Updater {
         } catch (Exception e) { return null; }
     }
 
+    /** What the background installer needs from the alert service: a tap when Android insists on asking, and the end of the attempt. */
+    interface Listener { void needsTap(Intent confirm); void finished(boolean ok, String message); }
+
+    /**
+     * Downloads the newest APK and installs it without the owner doing anything. On Android 12+ an app that installed itself
+     * once may update itself unattended (USER_ACTION_NOT_REQUIRED); otherwise the listener gets the confirmation screen to offer as a notification.
+     */
+    static void backgroundInstall(final Context context, final String savedAddress, final Listener listener) {
+        try {
+            if (Build.VERSION.SDK_INT >= 26 && !context.getPackageManager().canRequestPackageInstalls()) { listener.finished(false, "Autorisation d’installation manquante"); return; }
+            final String base = Relay.isRelayAddress(savedAddress) ? "https://github.com/Virus-101/Promed-Para/releases/latest/download" : savedAddress;
+            PackageInstaller installer = context.getPackageManager().getPackageInstaller();
+            PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+            if (Build.VERSION.SDK_INT >= 31) params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
+            final int id = installer.createSession(params);
+            PackageInstaller.Session session = installer.openSession(id);
+            HttpURLConnection c = (HttpURLConnection) new URL(base + "/PromedPara-Owner.apk").openConnection();
+            c.setConnectTimeout(10000); c.setReadTimeout(30000);
+            if (c.getResponseCode() != 200) { session.abandon(); listener.finished(false, "Téléchargement indisponible (" + c.getResponseCode() + ")"); return; }
+            try (InputStream in = c.getInputStream(); OutputStream out = session.openWrite("update", 0, -1)) {
+                byte[] buf = new byte[65536]; int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                session.fsync(out);
+            }
+            final String action = context.getPackageName() + ".BG_UPDATE_RESULT";
+            BroadcastReceiver receiver = new BroadcastReceiver() {
+                @Override public void onReceive(Context ctx, Intent intent) {
+                    int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -1);
+                    if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                        Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+                        if (confirm != null) { confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); listener.needsTap(confirm); }
+                        return;
+                    }
+                    try { ctx.unregisterReceiver(this); } catch (Exception ignored) { }
+                    listener.finished(status == PackageInstaller.STATUS_SUCCESS, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE));
+                }
+            };
+            IntentFilter filter = new IntentFilter(action);
+            if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED); else context.registerReceiver(receiver, filter);
+            Intent intent = new Intent(action).setPackage(context.getPackageName());
+            PendingIntent pending = PendingIntent.getBroadcast(context, id, intent, PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            session.commit(pending.getIntentSender());
+            session.close();
+        } catch (Exception e) { listener.finished(false, e.getMessage()); }
+    }
+
     static void check(final Activity activity, final String savedAddress, final String apkName) {
         // away from the shop Wi-Fi the files come from the public GitHub release instead of the till
         final String base = Relay.isRelayAddress(savedAddress) ? "https://github.com/Virus-101/Promed-Para/releases/latest/download" : savedAddress;
