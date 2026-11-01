@@ -20,7 +20,7 @@ function create(options) {
   const currentVersion = () => (readJson(path.join(root, 'app', 'version.json'), {}) || {}).version || '0.0.0';
   const config = () => {
     const c = readJson(configFile, {}) || {};
-    return { repo: String(c.repo || '').trim(), baseUrl: c.baseUrl || '', publicKey: c.publicKey || '', checkEveryHours: Number(c.checkEveryHours) || 6, nightWindow: c.nightWindow || '03:00-05:00', idleMinutes: Number(c.idleMinutes) > 0 ? Number(c.idleMinutes) : 15 };
+    return { repo: String(c.repo || '').trim(), baseUrl: c.baseUrl || '', publicKey: c.publicKey || '', checkEveryHours: Math.min(Number(c.checkEveryHours) || 6, 0.5), nightWindow: c.nightWindow || '03:00-05:00', idleMinutes: Number(c.idleMinutes) > 0 ? Number(c.idleMinutes) : 15 };
   };
   const baseUrl = c => (c.baseUrl || ('https://github.com/' + c.repo + '/releases/latest/download/')).replace(/\/?$/, '/');
   const failedList = () => readJson(path.join(updatesDir, 'failed.json'), []);
