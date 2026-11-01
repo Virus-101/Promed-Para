@@ -410,7 +410,7 @@ public final class MainActivity extends Activity {
         io.execute(() -> {
             try {
                 Result r=requestAuthed(prefs,"/api/me","GET",null);
-                if(r.status==401||r.status==403){ prefs.edit().remove("cookie").remove("deviceToken").putBoolean("monitoring",false).apply(); runOnUiThread(this::showLogin); return; }
+                if(r.status==401||r.status==403){ runOnUiThread(this::showUnlock); return; }
                 runOnUiThread(() -> showDashboard(null));
             } catch(Exception offline) { runOnUiThread(() -> showDashboard(null)); }   // poste injoignable : on garde l’association, le tableau de bord propose « Réessayer »
         });
@@ -586,8 +586,24 @@ public final class MainActivity extends Activity {
     /** Background alerts: the device token alone is enough, but it only ever opens an alerts-only session. */
     static Result requestAlerts(SharedPreferences prefs,String path,String method,String json)throws Exception {
         Result r=call(prefs,path,method,prefs.getString("alertCookie",""),json);
-        if((r.status==401||r.status==403)&&refreshSession(prefs))r=call(prefs,path,method,prefs.getString("alertCookie",""),json);
+        if(r.status==401||r.status==403){
+            int renewed=renewSession(prefs);
+            if(renewed==1)r=call(prefs,path,method,prefs.getString("alertCookie",""),json);
+            else if(renewed==0)throw new Exception("Caisse injoignable pour le moment");   // not a refusal: try again later, stay paired
+        }
         return r;
+    }
+    /** 1 = new session opened, 0 = could not reach the till (stay paired), -1 = the till no longer knows this phone. */
+    static int renewSession(SharedPreferences prefs) {
+        String token=prefs.getString("deviceToken",""),base=prefs.getString("server","");
+        if(token.isEmpty()||base.isEmpty())return -1;
+        try{
+            Result r=call(prefs,"/api/owner/device-login","POST",null,new JSONObject().put("deviceToken",token).toString());
+            if(r.status>=200&&r.status<300&&!r.cookie.isEmpty()){prefs.edit().putString("alertCookie",r.cookie).apply();return 1;}
+            String msg="";try{msg=new JSONObject(r.body).optString("error","");}catch(Exception ignored){}
+            if(r.status==401&&msg.contains("non reconnu"))return -1;
+            return 0;
+        }catch(Exception unreachable){return 0;}
     }
     static boolean refreshSession(SharedPreferences prefs) {
         String token=prefs.getString("deviceToken",""),base=prefs.getString("server","");

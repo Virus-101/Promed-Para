@@ -75,7 +75,7 @@ public final class MonitorService extends Service {
         for(int page=0;page<10&&running;page++){
             long after=prefs.getLong("last_seq",0);
             MainActivity.Result result=MainActivity.requestAlerts(prefs,"/api/notifications?afterSeq="+after,"GET",null);
-            if(result.status==401||result.status==403){alert("Reconnectez-vous à PromedPara","Ce téléphone n’est plus associé à la caisse. Ouvrez l’application et associez-le à nouveau.",System.currentTimeMillis());prefs.edit().putBoolean("monitoring",false).apply();return;}
+            if(result.status==401||result.status==403){if(MainActivity.renewSession(prefs)==-1){alert("Reconnectez-vous à PromedPara","Ce téléphone a été retiré de la caisse. Ouvrez l’application et associez-le à nouveau.",System.currentTimeMillis());prefs.edit().putBoolean("monitoring",false).apply();return;}throw new Exception("Caisse injoignable pour le moment");}
             if(result.status<200||result.status>=300)throw new Exception("Caisse indisponible");
             JSONArray list=new JSONObject(result.body).optJSONArray("notifications");if(list==null||list.length()==0){if(first)prefs.edit().putLong("last_seq",after).apply();break;}
             for(int i=0;i<list.length();i++){JSONObject note=list.optJSONObject(i);if(first){if(note!=null)prefs.edit().putLong("last_seq",Math.max(prefs.getLong("last_seq",0),note.optLong("sequence",0))).apply();}else handleNotification(note);}
@@ -92,7 +92,7 @@ public final class MonitorService extends Service {
                 String base=prefs.getString("server","").replaceAll("/+$","");String cookie=prefs.getString("alertCookie","");
                 connection=(HttpURLConnection)new URL(base+"/api/events").openConnection();currentConnection=connection;connection.setRequestMethod("GET");connection.setConnectTimeout(9000);connection.setReadTimeout(70000);connection.setRequestProperty("Accept","text/event-stream");connection.setRequestProperty("Cookie",cookie);connection.setRequestProperty("Cache-Control","no-cache");
                 int status=connection.getResponseCode();
-                if((status==401||status==403)&&MainActivity.refreshSession(prefs)){setStatus("Session renouvelée · reconnexion…");continue;}
+                if(status==401||status==403){int renewed=MainActivity.renewSession(prefs);if(renewed==1){setStatus("Session renouvelée · reconnexion…");continue;}if(renewed==0)throw new Exception("Caisse injoignable pour le moment");}
                 if(status==401||status==403){alert("Reconnectez-vous à PromedPara","Ce téléphone n’est plus associé à la caisse. Ouvrez l’application et associez-le à nouveau.",System.currentTimeMillis());prefs.edit().putBoolean("monitoring",false).remove("cookie").apply();running=false;broadcastRefresh();break;}
                 if(status<200||status>=300)throw new Exception("HTTP "+status);
                 setStatus("Connecté au poste · écoute des événements");
