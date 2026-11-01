@@ -116,7 +116,29 @@ if (!db.prepare('PRAGMA table_info(products)').all().some(column => column.name 
 
 const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || '0.0.0.0';
-const sessions = new Map();
+class PersistentSessions extends Map {
+  constructor(file) {
+    super(); this.file = file; this.timer = null;
+    try {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      for (const [key, value] of Object.entries(saved)) if (value && value.expires > Date.now()) super.set(key, value);
+    } catch (error) { /* first start or unreadable: nobody is signed in */ }
+  }
+  key(token) { return /^[a-f0-9]{64}$/.test(String(token)) ? String(token) : createHash('sha256').update(String(token)).digest('hex'); }
+  get(token) { return super.get(this.key(token)); }
+  set(token, value) { super.set(this.key(token), value); this.save(); return this; }
+  delete(token) { const done = super.delete(this.key(token)); this.save(); return done; }
+  save() {
+    {
+      try {
+        const out = {}; for (const [key, value] of this.entries()) if (value.expires > Date.now()) out[key] = value;
+        const text = JSON.stringify(out), temp = this.file + '.tmp';
+        try { fs.writeFileSync(temp, text); fs.renameSync(temp, this.file); } catch (renameError) { fs.writeFileSync(this.file, text); }
+      } catch (error) { console.error('sessions not saved:', error.message); }
+    }
+  }
+}
+const sessions = new PersistentSessions(path.join(DATA_DIR, 'sessions.json'));
 const eventClients = new Set();
 const pendingProductImports = new Map();
 let deviceCache = null;
@@ -304,7 +326,7 @@ const totpAt = (secretHex, step) => {
 const shopClock = () => { const now = new Date(); return String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'); };   // the till's own clock, same as its screen
 const createSession = (user, scope) => {
   const token = randomBytes(32).toString('base64url');
-  sessions.set(token, { userId: user.id, expires: Date.now() + 12 * 60 * 60_000, scope: scope || 'full' });
+  sessions.set(token, { userId: user.id, expires: Date.now() + 12 * 60 * 60_000, scope: scope || 'full', createdAt: Date.now() });
   if (user.role === 'cashier') createNotification('Employé connecté', `${user.name} · a ouvert la caisse`, 'staff');
   return { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${12 * 60 * 60}` };
 };
@@ -771,13 +793,15 @@ async function api(request, response, url) {
     createNotification('Badge employé associé', `${pairing.name} · téléphone ajouté`, 'security');
     return send(response, 201, { deviceId, secret, name:pairing.name, business:'PromedPara', relay: remoteLink.enabled ? { base: remoteLink.url.replace(/\/$/, ''), tillId: remoteLink.tillId, key: remoteLink.workerKey } : null });
   }
-  const shiftOf = userId => {
+  const shiftOf = (userId, sinceMs) => {
     const shopDay = date => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Casablanca', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map(part => [part.type, part.value])); return p.year + '-' + p.month + '-' + p.day; };
     const today = shopDay(new Date());
-    const rows = db.prepare('SELECT id,total_cents,created_at FROM sales WHERE cashier_id=? AND created_at>=? ORDER BY created_at').all(userId, new Date(Date.now() - 36 * 3600_000).toISOString()).filter(row => shopDay(new Date(row.created_at)) === today);
+    const rows = sinceMs
+      ? db.prepare('SELECT id,total_cents,created_at FROM sales WHERE cashier_id=? AND created_at>=? ORDER BY created_at').all(userId, new Date(sinceMs).toISOString())
+      : db.prepare('SELECT id,total_cents,created_at FROM sales WHERE cashier_id=? AND created_at>=? ORDER BY created_at').all(userId, new Date(Date.now() - 36 * 3600_000).toISOString()).filter(row => shopDay(new Date(row.created_at)) === today);
     let items = 0;
     for (const row of rows) items += Number(db.prepare('SELECT COALESCE(SUM(qty),0) AS n FROM sale_lines WHERE sale_id=?').get(row.id).n) || 0;
-    return { day: today, tickets: rows.length, totalCents: rows.reduce((sum, row) => sum + row.total_cents, 0), items: items, first: rows.length ? rows[0].created_at : '', last: rows.length ? rows[rows.length - 1].created_at : '' };
+    return { day: today, since: sinceMs ? new Date(sinceMs).toISOString() : '', tickets: rows.length, totalCents: rows.reduce((sum, row) => sum + row.total_cents, 0), items: items, first: rows.length ? rows[0].created_at : '', last: rows.length ? rows[rows.length - 1].created_at : '' };
   };
   if (route === '/api/mobile/products' && request.method === 'GET') {
     requireOwner(request);
@@ -798,12 +822,12 @@ async function api(request, response, url) {
     return send(response, 200, { total, offset, items, counts: { all: count('1=1'), low: count(wheres.low), out: count(wheres.out), review: count(wheres.review) } });
   }
   if (route === '/api/me/shift' && request.method === 'GET') {
-    const me = requireUser(request);
-    return send(response, 200, shiftOf(me.id));
+    const me = requireUser(request), mine = sessions.get(cookieToken(request));
+    return send(response, 200, shiftOf(me.id, mine && mine.createdAt));
   }
   if (route === '/api/logout' && request.method === 'POST') {
     const ending = sessions.get(cookieToken(request)), who = ending && db.prepare('SELECT name,role FROM users WHERE id=?').get(ending.userId);
-    if (who && who.role === 'cashier') { const day = shiftOf(ending.userId); createNotification('Employé déconnecté', `${who.name} · a fermé la caisse · ${day.tickets} ticket(s), ${(day.totalCents / 100).toFixed(2).replace('.', ',')} MAD aujourd’hui`, 'staff'); }
+    if (who && who.role === 'cashier') { const day = shiftOf(ending.userId, ending.createdAt); createNotification('Employé déconnecté', `${who.name} · a fermé la caisse · ${day.tickets} ticket(s), ${(day.totalCents / 100).toFixed(2).replace('.', ',')} MAD pendant sa session`, 'staff'); }
     sessions.delete(cookieToken(request));
     return send(response, 200, { ok: true }, { 'Set-Cookie': 'pp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
   }
