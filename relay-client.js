@@ -139,7 +139,7 @@ function start(options) {
     let delay = 2000;
     while (!stopped) {
       try {
-        const register = () => { let handles = []; try { handles = Array.from(new Set((options.ownerNames ? options.ownerNames() : []).filter(Boolean).map(handleOf))).slice(0, 40); } catch (error) { handles = []; } return call('PUT', '/t/' + cfg.tillId, JSON.stringify({ pub: ecdh.getPublicKey('hex'), handles: handles }), 20000); };
+        const register = () => { let handles = []; try { handles = Array.from(new Set((options.ownerNames ? options.ownerNames() : []).filter(Boolean).map(handleOf))).slice(0, 40); } catch (error) { handles = []; } return call('PUT', '/t/' + cfg.tillId, JSON.stringify({ pub: ecdh.getPublicKey('hex'), handles: handles, version: String(options.version || '') }), 20000); };
         const registered = await register(); let registeredAt = Date.now();
         if (registered.status !== 200) throw new Error('register ' + registered.status);
         state.connected = true; state.lastOk = Date.now();

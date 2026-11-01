@@ -67,6 +67,7 @@ const server = http.createServer(async (req, res) => {
         }
         const entry = tills.get(id);
         if (/^[a-f0-9]{130}$/.test(String(info.pub || ''))) entry.pub = info.pub;
+        if (/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(String(info.version || ''))) entry.version = String(info.version);
         if (Array.isArray(info.handles)) entry.handles = new Set(info.handles.map(String).filter(h => /^[a-f0-9]{64}$/.test(h)).slice(0, 40));
         entry.lastSeen = Date.now();
         return send(res, 200, { ok: true });
@@ -95,8 +96,15 @@ const server = http.createServer(async (req, res) => {
     if (parts[0] === 'h' && /^[a-f0-9]{64}$/.test(parts[1] || '') && req.method === 'GET') {
       if (limited(ip, 30)) return send(res, 429, { error: 'too many requests' });
       const found = [];
-      for (const [tillId, t] of tills) if (t.pub && t.handles && t.handles.has(parts[1]) && online(t)) found.push({ id: tillId, pub: t.pub });
+      for (const [tillId, t] of tills) if (t.pub && t.handles && t.handles.has(parts[1]) && online(t)) found.push({ id: tillId, pub: t.pub, version: t.version || '' });
       return send(res, 200, { tills: found.slice(0, 5) });
+    }
+
+    // ---- is this till online, and which version does it run? (no secret in the answer)
+    if (parts[0] === 's' && ID.test(parts[1] || '') && req.method === 'GET') {
+      if (limited(ip, 60)) return send(res, 429, { error: 'too many requests' });
+      const t = tills.get(parts[1]);
+      return send(res, 200, t ? { online: Boolean(online(t)), version: t.version || '', lastSeen: new Date(t.lastSeen).toISOString() } : { online: false, version: '', lastSeen: '' });
     }
 
     // ---- phone side

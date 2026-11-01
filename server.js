@@ -1435,7 +1435,7 @@ server.listen(PORT,HOST,()=>{
     };
     setTimeout(watchStaged, Number(process.env.PROMEDPARA_STAGED_FIRST_MS) || 60000); const timer = setInterval(watchStaged, 10 * 60000); if (timer.unref) timer.unref();
   } catch (error) { console.error('update notices:', error.message); }
-  startRemote = () => { try { remoteLink = require('./relay-client').start({ dataDir: DATA_DIR, port: PORT, defaultUrl: process.env.PROMEDPARA_RELAY_URL !== undefined ? process.env.PROMEDPARA_RELAY_URL : RELAY_URL, activeCodes: activePairingCodes, ownerNames: () => { const names = []; for (const row of db.prepare("SELECT name,username FROM users WHERE role='owner' AND active=1").all()) names.push(row.name, row.username); return names; } }); } catch (error) { console.error('relay client:', error.message); } };
+  startRemote = () => { try { remoteLink = require('./relay-client').start({ dataDir: DATA_DIR, port: PORT, defaultUrl: process.env.PROMEDPARA_RELAY_URL !== undefined ? process.env.PROMEDPARA_RELAY_URL : RELAY_URL, activeCodes: activePairingCodes, version: APP_VERSION, ownerNames: () => { const names = []; for (const row of db.prepare("SELECT name,username FROM users WHERE role='owner' AND active=1").all()) names.push(row.name, row.username); return names; } }); } catch (error) { console.error('relay client:', error.message); } };
   startRemote();
   console.log(`PromedPara local service: http://localhost:${PORT}`);
   for(const entries of Object.values(os.networkInterfaces()))for(const item of entries||[])if(item.family==='IPv4'&&!item.internal)console.log(`Owner phone (same Wi-Fi): http://${item.address}:${PORT}`);
