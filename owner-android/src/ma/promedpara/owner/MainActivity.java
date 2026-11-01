@@ -103,6 +103,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean("monitoring", false)) WatchdogJob.schedule(this);
         SystemBars.apply(this, HEADER, BG);
         if (prefs.getString("deviceToken", "").isEmpty()) showLogin(); else showUnlock();
     }
@@ -420,7 +421,7 @@ public final class MainActivity extends Activity {
         begin("Vue propriétaire", "Bonjour, "+name+".", "Résumé et alertes du poste PromedPara.", false);
         LinearLayout area=column(); pad(area,16,17,16,28); root.addView(area);
         if(data==null){TextView loading=text("Chargement des ventes et du stock…",14,MUTED,false);withIcon(loading,"activity",18,MUTED,8);area.addView(loading);Button retry=button("Réessayer",true,"refresh_cw",this::loadDashboard);LinearLayout.LayoutParams rp=lp(-1,54);rp.topMargin=dp(12);area.addView(retry,rp);Button logout=button("Déconnexion",false,"log_out",this::logout);LinearLayout.LayoutParams op=lp(-1,52);op.topMargin=dp(8);area.addView(logout,op);loadDashboard();return;}
-        if(!prefs.getBoolean("monitoring",false)&&!prefs.getBoolean("userStopped",false)&&!askedAlertsThisRun){askedAlertsThisRun=true;requestNotificationPermissionAndStart();}
+        if(!prefs.getBoolean("monitoring",false)&&!prefs.getBoolean("userStopped",false)&&!askedAlertsThisRun){askedAlertsThisRun=true;requestNotificationPermissionAndStart();}else if(prefs.getBoolean("monitoring",false)&&!askedAlertsThisRun){askedAlertsThisRun=true;WatchdogJob.schedule(this);askStayAwake();}
         LinearLayout metrics=row(); area.addView(metrics);
         addMetric(metrics,"VENTES AUJOURD’HUI",money(data.optLong("revenueCents")),data.optInt("salesCount")+" ticket(s)",true,"trending_up");
         addMetric(metrics,"PRODUITS",String.valueOf(data.optInt("productCount")),data.optJSONArray("lowStock")==null?"Catalogue":"Stock local",false,"package");
@@ -544,10 +545,23 @@ public final class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){super.onRequestPermissionsResult(requestCode,permissions,grantResults);if(requestCode==51&&grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED)startMonitoring();else if(requestCode==51)toast("Autorisez les notifications Android pour recevoir les alertes de vente et de stock.");}
 
     private boolean askedAlertsThisRun;
-    private void startMonitoring() {
-        prefs.edit().putBoolean("monitoring",true).remove("userStopped").apply();Intent i=new Intent(this,MonitorService.class);if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);toast("Surveillance locale démarrée.");loadDashboard();
+    /** Once: ask Android to let the alert service run all day (Samsung and others otherwise stop it in the background). */
+    private void askStayAwake() {
+        try {
+            if (Build.VERSION.SDK_INT < 23 || prefs.getBoolean("batteryAsked", false)) return;
+            android.os.PowerManager power = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            if (power != null && power.isIgnoringBatteryOptimizations(getPackageName())) return;
+            prefs.edit().putBoolean("batteryAsked", true).apply();
+            new android.app.AlertDialog.Builder(this).setTitle("Rester connecté en permanence")
+                .setMessage("Pour recevoir les alertes toute la journée, même après un redémarrage, autorisez PromedPara à rester actif en arrière-plan. Android va vous demander une confirmation : touchez « Autoriser ».")
+                .setNegativeButton("Plus tard", null)
+                .setPositiveButton("Continuer", (d, w) -> { try { startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:" + getPackageName()))); } catch (Exception e) { try { startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)); } catch (Exception ignored) { } } }).show();
+        } catch (Exception ignored) { }
     }
-    private void stopMonitoring() { prefs.edit().putBoolean("monitoring",false).putBoolean("userStopped",true).apply();stopService(new Intent(this,MonitorService.class));toast("Surveillance arrêtée.");loadDashboard(); }
+    private void startMonitoring() {
+        prefs.edit().putBoolean("monitoring",true).remove("userStopped").apply();WatchdogJob.schedule(this);askStayAwake();Intent i=new Intent(this,MonitorService.class);if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);toast("Surveillance locale démarrée.");loadDashboard();
+    }
+    private void stopMonitoring() { WatchdogJob.cancel(this);prefs.edit().putBoolean("monitoring",false).putBoolean("userStopped",true).apply();stopService(new Intent(this,MonitorService.class));toast("Surveillance arrêtée.");loadDashboard(); }
     private void logout() {
         unlocked=false; CodeVault.forget(prefs);
         prefs.edit().putBoolean("monitoring",false).apply(); stopService(new Intent(this,MonitorService.class));

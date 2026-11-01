@@ -11,6 +11,7 @@ public final class BootReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context context, Intent intent) {
         SharedPreferences prefs = context.getSharedPreferences(MainActivity.PREFS, Context.MODE_PRIVATE);
         if (!prefs.getBoolean("monitoring", false) || prefs.getString("deviceToken", "").isEmpty()) return;
+        WatchdogJob.schedule(context);
         try {
             Intent service = new Intent(context, MonitorService.class);
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(service); else context.startService(service);
