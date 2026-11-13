@@ -1,0 +1,205 @@
+'use strict';
+// One owner (the administrator); employees can be added, renamed and removed and open the till with their own PIN. Unknown scanned codes can be linked.
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+const KIT = path.resolve(__dirname, '..', '..', 'PromedPara-USB');
+const DATA = path.resolve(__dirname, '..', '..', '_accountsdata');
+const PORT = 4195, BASE = 'http://127.0.0.1:' + PORT;
+const results = []; let proc;
+const ok = (name, cond, extra) => { results.push(!!cond); console.log((cond ? 'PASS ' : 'FAIL ') + name + (cond ? '' : '  -> ' + JSON.stringify(extra))); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+(async () => {
+  fs.rmSync(DATA, { recursive: true, force: true });
+  proc = spawn(path.join(KIT, 'runtime', 'node.exe'), ['main.js'], { cwd: path.join(KIT, 'app'), env: Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA, PORT: String(PORT), HOST: '127.0.0.1', PROMEDPARA_RELAY_URL: '' }) });
+  for (let i = 0; i < 60; i++) { try { await fetch(BASE + '/api/status'); break; } catch (e) { await sleep(250); } }
+  let cookie = '';
+  const api = async (method, url, body) => {
+    const res = await fetch(BASE + url, { method, headers: Object.assign({ 'Content-Type': 'application/json' }, cookie ? { Cookie: cookie } : {}), body: body ? JSON.stringify(body) : undefined });
+    const set = res.headers.get('set-cookie'); if (set) cookie = set.split(';')[0];
+    return { status: res.status, json: await res.json().catch(() => null) };
+  };
+  let r = await api('POST', '/api/setup', { name: 'Hicham Amini', pin: 'Accounts-Test-1' });
+  ok('the administrator owner is created', r.status === 201, r);
+  const admin = cookie;
+  r = await api('POST', '/api/team', { name: 'Souad', role: 'owner' });
+  ok('a second owner account is refused', r.status === 409 && /un seul compte propriétaire/.test(r.json.error), r);
+  r = await api('POST', '/api/team', { name: 'Asmae', role: 'cashier', pin: '4821' });
+  ok('an employee is added with a PIN', r.status === 201, r);
+  r = await api('POST', '/api/team', { name: 'Karim', role: 'cashier', pin: '7351' });
+  ok('and another employee too', r.status === 201, r);
+  let team = await api('GET', '/api/team');
+  const asmae = team.json.users.find(u => u.name === 'Asmae'), karim = team.json.users.find(u => u.name === 'Karim');
+  r = await api('POST', '/api/team/' + asmae.id + '/rename', { name: 'Asmae B.' });
+  ok('an employee can be renamed', r.status === 200, r);
+  cookie = '';
+  r = await api('POST', '/api/worker/pin-login', { pin: '4821' });
+  ok('the employee opens the till with the PIN pad', r.status === 200 && r.json.user.role === 'cashier', r);
+  const asmaeSession = cookie;
+  cookie = '';
+  r = await api('POST', '/api/worker/pin-login', { pin: 'Accounts-Test-1' });
+  ok('the PIN pad does not open the administrator account, and says where to sign in', r.status === 403 && /nom et mon code/.test(r.json.error), r);
+  cookie = admin;
+  r = await api('GET', '/api/notifications?afterSeq=0');
+  ok('the owner is told when an employee signs in', r.json.notifications.some(n => /Employé connecté/.test(n.title)), r.json.notifications.map(n => n.title));
+  // unknown scanned codes
+  await api('POST', '/api/products', { name: 'Doliprane 1000mg', price: 25, quantity: 10, category: 'Test', cost: 15, reorderLevel: 2, barcode: '' });
+  cookie = asmaeSession;
+  r = await api('POST', '/api/unknown-scans', { code: '6110203002432' });
+  ok('an employee scanning an unknown code records it', r.status === 200 && r.json.recorded === true, r);
+  await api('POST', '/api/unknown-scans', { code: '6110203002432' });
+  cookie = admin;
+  r = await api('GET', '/api/unknown-scans');
+  ok('the owner sees the code with its scan count', r.json.codes.length === 1 && r.json.codes[0].scans === 2, r.json);
+  const products = await api('GET', '/api/products');
+  const doli = products.json.products.find(p => p.name === 'Doliprane 1000mg');
+  r = await api('POST', '/api/barcode-link', { code: '6110203002432', productId: doli.id });
+  ok('the owner links the code to a product', r.status === 200 && r.json.product.barcode === '6110203002432', r);
+  r = await api('GET', '/api/unknown-scans');
+  ok('the code leaves the waiting list', r.json.codes.length === 0, r.json);
+  r = await api('GET', '/api/products');
+  ok('the product now carries the barcode', r.json.products.find(p => p.id === doli.id).barcode === '6110203002432');
+  r = await api('POST', '/api/unknown-scans', { code: '6110203002432' });
+  ok('scanning it again is no longer unknown', r.json.known === true, r);
+  // an employee may attach a code to a product that has none, never overwrite one
+  await api('POST', '/api/products', { name: 'Vitamine C', price: 40, quantity: 5, category: 'Test', cost: 20, reorderLevel: 1, barcode: '' });
+  const list2 = await api('GET', '/api/products');
+  const vitc = list2.json.products.find(p => p.name === 'Vitamine C');
+  cookie = asmaeSession;
+  r = await api('POST', '/api/barcode-link', { code: '3400000000017', productId: vitc.id });
+  ok('an employee registers a barcode for a product that has none', r.status === 200, r);
+  r = await api('POST', '/api/barcode-link', { code: '3400000000024', productId: vitc.id });
+  ok('but cannot overwrite an existing barcode', r.status === 403, r);
+  cookie = admin;
+  // the employee's own total for the day, shown at sign-out and sent to the owner
+  cookie = asmaeSession;
+  r = await api('POST', '/api/sales', { lines: [{ productId: doli.id, qty: 2 }], payment: 'Espèces', received: 100, note: '' });
+  ok('the employee sells', r.status === 201, r);
+  r = await api('GET', '/api/me/shift');
+  ok('the running total lists each product with its time', r.json.lines && r.json.lines.length === 1 && r.json.lines[0].at, r.json);
+  ok('the employee sees the day total (50,00 MAD, 1 ticket, 2 articles)', r.status === 200 && r.json.totalCents === 5000 && r.json.tickets === 1 && r.json.items === 2, r.json);
+  r = await api('POST', '/api/logout', {});
+  cookie = admin;
+  r = await api('GET', '/api/notifications?afterSeq=0');
+  ok('the owner gets the day total when the employee signs out', r.json.notifications.some(n => /Employé déconnecté/.test(n.title) && /1 ticket\(s\), 50,00 MAD/.test(n.body)), r.json.notifications.filter(n => /déconnecté/.test(n.title)).map(n => n.body));
+  r = await api('GET', '/api/mobile/shifts');
+  const rep = r.json.reports && r.json.reports[0];
+  ok('the sign-out is kept as a report with every product and the time of its sale', r.status === 200 && rep && rep.tickets === 1 && rep.lines.length === 1 && rep.lines[0].name === 'Doliprane 1000mg' && rep.lines[0].qty === 2 && /^\d{4}-\d\d-\d\dT/.test(rep.lines[0].at), r.json);
+  // an employee can see and start a ready update, nothing else about updates
+  fs.writeFileSync(path.join(DATA, 'update-status.json'), JSON.stringify({ enabled: true, staged: '9.9.9', saved: [], failed: [] }));
+  cookie = '';
+  await api('POST', '/api/worker/pin-login', { pin: '4821' });
+  r = await api('GET', '/api/update/status');
+  ok('the employee is told an update is ready', r.status === 200 && r.json.staged === '9.9.9' && !('saved' in r.json), r);
+  r = await api('POST', '/api/update/command', { action: 'rollback', version: '1.0.0' });
+  ok('but cannot roll back', r.status === 403, r);
+  r = await api('POST', '/api/update/command', { action: 'apply' });
+  ok('and can install it', r.status === 202 && fs.existsSync(path.join(DATA, 'update-command.json')), r);
+  fs.rmSync(path.join(DATA, 'update-command.json'), { force: true }); fs.writeFileSync(path.join(DATA, 'update-status.json'), JSON.stringify({ enabled: true, saved: [], failed: [] }));
+  r = await api('POST', '/api/update/command', { action: 'apply' });
+  ok('nothing is installed when no update is ready', r.status === 409, r);
+  cookie = admin;
+  // the phone's product list: everything, low stock, to review
+  await api('POST', '/api/products', { name: 'Sirop sans prix achat', price: 18, quantity: 1, category: 'Test', cost: 0, reorderLevel: 3, barcode: '' });
+  r = await api('GET', '/api/mobile/products?filter=all&limit=10');
+  ok('the phone gets the product list with counts', r.status === 200 && r.json.total >= 3 && r.json.items.length >= 3 && r.json.counts.all === r.json.total, r.json.counts);
+  r = await api('GET', '/api/mobile/products?filter=low');
+  ok('low stock shows only products at or under their threshold', r.json.items.length >= 1 && r.json.items.every(p => p.low), r.json.items.map(p => p.name));
+  r = await api('GET', '/api/mobile/products?filter=review');
+  ok('products to review say why', r.json.items.some(p => p.name === 'Sirop sans prix achat' && p.issues.includes('prix d’achat manquant')), r.json.items.map(p => [p.name, p.issues]));
+  r = await api('GET', '/api/mobile/products?q=dolip');
+  ok('the search finds a product by name', r.json.items.length === 1 && /Doliprane/.test(r.json.items[0].name), r.json.items.map(p => p.name));
+  cookie = asmaeSession;
+  r = await api('GET', '/api/mobile/products');
+  ok('an employee cannot read the owner list', r.status === 403 || r.status === 401, r.status);
+  cookie = admin;
+  cookie = '';
+  await api('POST', '/api/worker/pin-login', { pin: '4821' });
+  const asmaeSession3 = cookie;
+  cookie = admin;
+  // selling at zero stock is allowed, the owner is told, stock never goes negative
+  await api('POST', '/api/products', { name: 'Produit à stock zéro', price: 10, quantity: 0, category: 'Test', cost: 5, reorderLevel: 1, barcode: '' });
+  const zero = (await api('GET', '/api/products')).json.products.find(p => p.name === 'Produit à stock zéro');
+  cookie = asmaeSession3;
+  r = await api('POST', '/api/sales', { lines: [{ productId: zero.id, qty: 2 }], payment: 'Carte', received: 20, note: '' });
+  ok('an employee can sell a product whose stock says zero', r.status === 201, r);
+  cookie = admin;
+  r = await api('GET', '/api/notifications?afterSeq=0');
+  ok('the owner is told about the sale outside stock', r.json.notifications.some(n => /Vendu hors stock/.test(n.title) && /Produit à stock zéro/.test(n.body)), r.json.notifications.map(n => n.title));
+  const after = (await api('GET', '/api/products')).json.products.find(p => p.id === zero.id);
+  ok('and the stock stays at zero, not negative', after.quantity === 0, after.quantity);
+  r = await api('POST', '/api/security', { strictStock: true });
+  ok('the owner can switch the strict stock rule on', r.status === 200 && r.json.strictStock === true, r);
+  cookie = asmaeSession3;
+  r = await api('POST', '/api/sales', { lines: [{ productId: zero.id, qty: 1 }], payment: 'Carte', received: 10, note: '' });
+  ok('then a sale at zero stock is refused', r.status === 409, r);
+  cookie = admin;
+  await api('POST', '/api/security', { strictStock: false });
+  // an employee can ask the till to look for an update
+  cookie = asmaeSession3;
+  r = await api('POST', '/api/update/command', { action: 'check' });
+  ok('an employee can ask for an update check', r.status === 202, r);
+  cookie = admin;
+  // the owner can make a ready update mandatory for employees
+  fs.writeFileSync(path.join(DATA, 'update-status.json'), JSON.stringify({ enabled: true, staged: '9.9.9', saved: [], failed: [] }));
+  cookie = admin;
+  r = await api('GET', '/api/update/status');
+  ok('an update is optional by default', r.json.mandatory === false, r.json);
+  r = await api('POST', '/api/update/policy', { mandatory: true });
+  ok('the owner makes it mandatory', r.status === 200 && r.json.mandatory === true, r);
+  cookie = asmaeSession3;
+  r = await api('GET', '/api/update/status');
+  ok('the employee is told it is mandatory', r.json.mandatory === true && r.json.staged === '9.9.9', r.json);
+  r = await api('POST', '/api/update/policy', { mandatory: false });
+  ok('an employee cannot change the policy', r.status === 403, r);
+  fs.writeFileSync(path.join(DATA, 'update-status.json'), JSON.stringify({ enabled: true, staged: '9.9.10', saved: [], failed: [] }));
+  r = await api('GET', '/api/update/status');
+  ok('a newer version starts optional again', r.json.mandatory === false, r.json);
+  fs.writeFileSync(path.join(DATA, 'update-status.json'), JSON.stringify({ enabled: true, saved: [], failed: [] }));
+  cookie = admin;
+  // owner sign-in on the till never waits for a phone
+  cookie = '';
+  r = await api('POST', '/api/login', { username: 'Hicham Amini', password: 'Accounts-Test-1' });
+  ok('the owner signs in on the till without any phone approval', r.status === 200 && !r.json.approval, r);
+  cookie = admin;
+  // a restart of the till (an update) keeps the employee signed in and keeps the running total
+  cookie = asmaeSession3;
+  const before = await api('GET', '/api/me/shift');
+  ok('the employee total runs from the sign-in', before.status === 200 && before.json.totalCents > 0 && Boolean(before.json.since), before.json);
+  proc.kill(); await sleep(900);
+  proc = spawn(path.join(KIT, 'runtime', 'node.exe'), ['main.js'], { cwd: path.join(KIT, 'app'), env: Object.assign({}, process.env, { PROMEDPARA_DATA_DIR: DATA, PORT: String(PORT), HOST: '127.0.0.1', PROMEDPARA_RELAY_URL: '' }) });
+  for (let i = 0; i < 60; i++) { try { await fetch(BASE + '/api/status'); break; } catch (e) { await sleep(250); } }
+  cookie = asmaeSession3;
+  r = await api('GET', '/api/me');
+  ok('after the restart the employee is still signed in', r.status === 200 && r.json.user.role === 'cashier', r);
+  r = await api('GET', '/api/me/shift');
+  ok('and the running total is unchanged', r.status === 200 && r.json.totalCents === before.json.totalCents && r.json.tickets === before.json.tickets, { before: before.json, after: r.json });
+  cookie = admin;
+  r = await api('GET', '/api/team');
+  ok('the owner is also still signed in', r.status === 200, r);
+  cookie = asmaeSession3;
+  r = await api('POST', '/api/logout', {});
+  cookie = asmaeSession3;
+  r = await api('GET', '/api/me');
+  ok('after sign-out the session is really gone', r.status === 401, r);
+  cookie = admin;
+  // removing an employee
+  r = await api('POST', '/api/team/' + karim.id + '/remove', {});
+  ok('the owner removes an employee', r.status === 200, r);
+  cookie = '';
+  r = await api('POST', '/api/worker/pin-login', { pin: '7351' });
+  ok('the removed employee can no longer sign in', r.status === 401, r);
+  cookie = admin;
+  team = await api('GET', '/api/team');
+  ok('and is gone from the list', !team.json.users.some(u => u.name === 'Karim'), team.json.users.map(u => u.name));
+  r = await api('POST', '/api/team/' + team.json.users.find(u => u.role === 'owner').id + '/remove', {});
+  ok('the owner account itself cannot be removed this way', r.status === 404, r);
+  try { proc.kill(); } catch (e) { /* gone */ }
+  await sleep(800);
+  fs.rmSync(DATA, { recursive: true, force: true });
+  const passed = results.filter(Boolean).length;
+  console.log('\n' + passed + '/' + results.length + ' account checks passed');
+  process.exit(passed === results.length ? 0 : 1);
+})().catch(error => { console.error(error); try { proc.kill(); } catch (e) { /* gone */ } process.exit(1); });
