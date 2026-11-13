@@ -1415,6 +1415,7 @@ const server=http.createServer(async(request,response)=>{
 });
 server.listen(PORT,HOST,()=>{
   createNotification('Serveur', 'Le serveur PromedPara a démarré', 'info');
+  if (db.recoveryInfo) createNotification('Base de données restaurée automatiquement', `Le fichier de données était illisible au démarrage (${db.recoveryInfo.reason}). La caisse a repris toute seule à partir de la sauvegarde « ${db.recoveryInfo.from} ». Vérifiez les ventes et changements faits après cette sauvegarde : ils ne sont pas dans la caisse. L'ancien fichier est conservé (${db.recoveryInfo.savedBroken}).`, 'security');
   try {
     // an update that was just installed: the owner is told, and the data and paired phones are untouched
     const marker = path.join(DATA_DIR, 'last-version.txt'); let previous = '';

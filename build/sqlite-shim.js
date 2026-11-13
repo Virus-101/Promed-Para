@@ -54,12 +54,53 @@ class Database {
     this.inTransaction = false;
     this.timer = null;
     this.dirty = false;
+    this.recoveryInfo = null;   // set when the file on disk was unreadable and a backup was restored automatically
     const existing = fs.existsSync(file) ? fs.readFileSync(file) : null;
-    if (existing && existing.length) this._dailyBackup();
-    this.sqljs = existing && existing.length ? new SQL.Database(existing) : new SQL.Database();
+    let sqljs = null;
+    if (existing && existing.length) {
+      try { sqljs = Database._open(SQL, existing); }
+      catch (openError) {
+        console.error('Base de données illisible (' + openError.message + ') : restauration automatique depuis la dernière sauvegarde…');
+        const recovered = this._autoRecover(SQL, openError);
+        if (recovered) { sqljs = recovered.sqljs; this.recoveryInfo = recovered.info; }
+        else throw openError;   // nothing usable to restore from: fail exactly as before, visibly
+      }
+    }
+    if (existing && existing.length && !this.recoveryInfo) this._dailyBackup();
+    this.sqljs = sqljs || new SQL.Database();
     this.sqljs.exec('PRAGMA foreign_keys = ON');
     this._onExit = () => this._flushSync();
     process.on('exit', this._onExit);
+  }
+  // Opens a buffer as a database AND proves the schema is actually readable (a truncated or zeroed file can
+  // otherwise look "open" to sql.js until the first real query touches it).
+  static _open(SQL, buffer) {
+    const sqljs = new SQL.Database(buffer);
+    sqljs.exec('SELECT 1 FROM sqlite_master LIMIT 1');
+    return sqljs;
+  }
+  // The live file could not be opened: try every kept backup (pre-update and daily), newest first, until one
+  // opens cleanly. The broken file is kept on disk under a new name, never deleted, in case of a later manual recovery.
+  _autoRecover(SQL, originalError) {
+    try {
+      const dir = path.join(path.dirname(this.file), 'backups');
+      if (!fs.existsSync(dir)) return null;
+      const candidates = fs.readdirSync(dir)
+        .filter(name => /\.sqlite$/.test(name))
+        .map(name => path.join(dir, name))
+        .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+      for (const candidate of candidates) {
+        let buffer;
+        try { buffer = fs.readFileSync(candidate); } catch (readError) { continue; }
+        let sqljs;
+        try { sqljs = Database._open(SQL, buffer); } catch (candidateError) { continue; }
+        const brokenAside = path.join(path.dirname(this.file), 'promedpara-corrompue-' + Date.now() + '.sqlite');
+        try { fs.renameSync(this.file, brokenAside); } catch (moveError) { /* best effort: keep going regardless */ }
+        fs.writeFileSync(this.file, buffer);
+        return { sqljs: sqljs, info: { from: path.basename(candidate), restoredAt: new Date().toISOString(), savedBroken: path.basename(brokenAside), reason: String(originalError && originalError.message || originalError) } };
+      }
+    } catch (recoverError) { console.error('Restauration automatique impossible :', recoverError.message); }
+    return null;
   }
   _dailyBackup() {
     try {
