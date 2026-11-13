@@ -22,7 +22,10 @@ console.log('entete_sqlite_valide: ' + (head === 'SQLite format 3' ? 'oui' : 'no
 
 initSqlJs({ wasmBinary: fs.readFileSync(path.join(vendorDir, 'sql-wasm.wasm')) }).then(function (SQL) {
   let db;
-  try { db = new SQL.Database(bytes); }
+  try {
+    db = new SQL.Database(bytes);
+    db.exec('SELECT count(*) FROM sqlite_master');  // SELECT 1 alone never touches a page; this forces sql.js to actually read one
+  }
   catch (e) { console.log('ouverture: echec (' + e.message + ')'); process.exit(1); return; }
   console.log('ouverture: ok');
 
