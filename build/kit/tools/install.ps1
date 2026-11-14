@@ -44,7 +44,7 @@ foreach ($d in @('app', 'runtime', 'electron', 'assets', 'android', 'tools')) {
     & robocopy.exe $src (Join-Path $dest $d) /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { Say ('Echec de la copie de ' + $d + ' (code ' + $LASTEXITCODE + ')') 'Red'; exit 1 }
 }
-foreach ($f in @('LANCER-CAISSE.vbs', 'TEST-LECTEUR.vbs', 'LIRE-MOI.txt', 'ARRETER-LA-CAISSE.bat', 'SAUVEGARDER-LES-DONNEES.bat', 'CONFIGURER-LES-MISES-A-JOUR.bat', 'RESET-CODE-ADMIN.bat', 'GUIDE.html', 'MANIFEST.sha256')) {
+foreach ($f in @('LANCER-CAISSE.vbs', 'TEST-LECTEUR.vbs', 'LIRE-MOI.txt', 'ARRETER-LA-CAISSE.bat', 'SAUVEGARDER-LES-DONNEES.bat', 'CONFIGURER-LES-MISES-A-JOUR.bat', 'RESET-CODE-ADMIN.bat', 'RESTAURER-UNE-SAUVEGARDE.bat', 'GUIDE.html', 'MANIFEST.sha256')) {
     $src = Join-Path $kit $f
     if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination (Join-Path $dest $f) -Force }
 }
