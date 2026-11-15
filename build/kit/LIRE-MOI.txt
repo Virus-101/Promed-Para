@@ -10,4 +10,8 @@ Resume (3 double-clics, dans cet ordre) :
 En cas d'erreur "Le serveur de la caisse ne repond pas" ou de base de donnees abimee :
   RESTAURER-UNE-SAUVEGARDE.bat -> remet en place la derniere sauvegarde qui fonctionne
 
+En cas de code ou de compte proprietaire perdu :
+  RESET-CODE-ADMIN.bat -> remplace le code de l'administrateur existant par un code temporaire
+  CREER-NOUVEAU-PROPRIETAIRE.bat -> cree un compte proprietaire tout neuf (anciens comptes desactives, rien supprime)
+
 If you read English: open GUIDE.html, it is written in English with the French screen names.

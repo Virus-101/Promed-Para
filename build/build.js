@@ -62,6 +62,7 @@ fs.copyFileSync(path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm
 fs.copyFileSync(path.join(__dirname, 'main.js'), path.join(APP, 'main.js'));
 fs.copyFileSync(path.join(__dirname, 'selftest.js'), path.join(APP, 'selftest.js'));
 fs.copyFileSync(path.join(__dirname, 'reset-admin.js'), path.join(APP, 'reset-admin.js'));
+fs.copyFileSync(path.join(__dirname, 'create-owner.js'), path.join(APP, 'create-owner.js'));
 fs.writeFileSync(path.join(APP, 'version.json'), JSON.stringify({ version: VERSION, builtAt: new Date().toISOString() }));
 
 // Update settings live in config\update.json (never replaced by an update): public key + GitHub repo ("owner/name").

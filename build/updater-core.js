@@ -13,7 +13,7 @@ const urlLib = require('url');
 const ALLOWED_DIRS = ['app/', 'electron/resources/app/', 'tools/'];
 const ALLOWED_ROOT_FILES = ['GUIDE.html', 'LIRE-MOI.txt', 'MANIFEST.sha256', 'LANCER-CAISSE.vbs', 'TEST-LECTEUR.vbs', '1-VERIFIER-LE-SYSTEME.bat',
   '2-INSTALLER.bat', '3-COLLECTER-LES-ERREURS.bat', 'ARRETER-LA-CAISSE.bat', 'SAUVEGARDER-LES-DONNEES.bat', 'CONFIGURER-LES-MISES-A-JOUR.bat', 'RESET-CODE-ADMIN.bat',
-  'RESTAURER-UNE-SAUVEGARDE.bat'];
+  'RESTAURER-UNE-SAUVEGARDE.bat', 'CREER-NOUVEAU-PROPRIETAIRE.bat'];
 const REPLACED_DIRS = ['app', 'electron/resources/app', 'tools'];
 const MAGIC = 'PPK1';
 const MAX_PACKAGE_BYTES = 60 * 1024 * 1024;
