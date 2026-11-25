@@ -40,7 +40,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const asmaeSession = cookie;
   cookie = '';
   r = await api('POST', '/api/worker/pin-login', { pin: 'Accounts-Test-1' });
-  ok('the PIN pad does not open the administrator account, and says where to sign in', r.status === 403 && /nom et mon code/.test(r.json.error), r);
+  ok('the PIN pad opens the administrator account directly on the till', r.status === 200 && r.json.user && r.json.user.isAdmin === true, r);
   cookie = admin;
   r = await api('GET', '/api/notifications?afterSeq=0');
   ok('the owner is told when an employee signs in', r.json.notifications.some(n => /Employé connecté/.test(n.title)), r.json.notifications.map(n => n.title));

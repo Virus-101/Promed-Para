@@ -664,13 +664,8 @@ async function api(request, response, url) {
     const body = await readBody(request), pin = String(body.pin || body.code || '').trim();
     let match = null;
     if (pin.length >= 4 && pin.length <= 64) {
-      for (const candidate of db.prepare("SELECT id,name,username,role,can_receive_stock,pin_hash FROM users WHERE active=1 AND (role='cashier' OR '1'=?) AND pin_hash IS NOT NULL").all(process.env.PROMEDPARA_ALLOW_MANY_ACCOUNTS === '1' ? '1' : '0')) {
+      for (const candidate of db.prepare('SELECT id,name,username,role,can_receive_stock,pin_hash FROM users WHERE active=1 AND pin_hash IS NOT NULL').all()) {
         if (passwordMatches(pin, candidate.pin_hash)) { match = candidate; break; }
-      }
-    }
-    if (!match && pin.length >= 4 && pin.length <= 64) {
-      for (const owner of db.prepare("SELECT pin_hash,password_hash FROM users WHERE active=1 AND role='owner'").all()) {
-        if ((owner.pin_hash && passwordMatches(pin, owner.pin_hash)) || (owner.password_hash && passwordMatches(pin, owner.password_hash))) throw new HttpError(403, 'Ce code est celui d’un propriétaire : touchez « Connexion avec mon nom et mon code » en bas de l’écran.');
       }
     }
     if (!match) {
