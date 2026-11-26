@@ -31,24 +31,38 @@ const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
 
 function fetchBuffer(url, options) {
   const opts = options || {};
-  const timeout = opts.timeout || 25000, maxBytes = opts.maxBytes || MAX_PACKAGE_BYTES;
+  // timeout: aborts only when the socket goes idle (no bytes at all for that long) - a trickling-but-alive
+  // connection never trips it, which is why maxDuration exists too: an overall cap regardless of activity,
+  // so a very slow link fails and gets retried later instead of sitting in "downloading" indefinitely.
+  const timeout = opts.timeout || 25000, maxBytes = opts.maxBytes || MAX_PACKAGE_BYTES, maxDuration = opts.maxDuration || 0;
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, arg) => { if (settled) return; settled = true; if (durationTimer) clearTimeout(durationTimer); fn(arg); };
+    const durationTimer = maxDuration ? setTimeout(() => { if (activeReq) activeReq.destroy(); finish(reject, new Error('delai total depasse (connexion trop lente)')); }, maxDuration) : null;
+    let activeReq = null;
     const go = (target, redirectsLeft) => {
       const lib = target.indexOf('https:') === 0 ? https : http;
       const req = lib.get(target, { headers: { 'User-Agent': 'PromedPara-Updater', 'Accept': '*/*' } }, res => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
-          if (redirectsLeft <= 0) return reject(new Error('trop de redirections'));
+          if (redirectsLeft <= 0) return finish(reject, new Error('trop de redirections'));
           return go(urlLib.resolve(target, res.headers.location), redirectsLeft - 1);
         }
-        if (res.statusCode !== 200) { res.resume(); const e = new Error('HTTP ' + res.statusCode); e.status = res.statusCode; return reject(e); }
+        if (res.statusCode !== 200) { res.resume(); const e = new Error('HTTP ' + res.statusCode); e.status = res.statusCode; return finish(reject, e); }
         const chunks = []; let size = 0;
-        res.on('data', c => { size += c.length; if (size > maxBytes) { req.destroy(); reject(new Error('fichier trop gros')); } else chunks.push(c); });
-        res.on('end', () => resolve(Buffer.concat(chunks)));
-        res.on('error', reject);
+        const total = Number(res.headers['content-length']) || 0;
+        res.on('data', c => {
+          size += c.length;
+          if (size > maxBytes) { req.destroy(); return finish(reject, new Error('fichier trop gros')); }
+          chunks.push(c);
+          if (opts.onProgress) { try { opts.onProgress(size, total); } catch (e) { /* ignore */ } }
+        });
+        res.on('end', () => finish(resolve, Buffer.concat(chunks)));
+        res.on('error', e => finish(reject, e));
       });
-      req.setTimeout(timeout, () => { req.destroy(); reject(new Error('delai depasse')); });
-      req.on('error', reject);
+      activeReq = req;
+      req.setTimeout(timeout, () => { req.destroy(); finish(reject, new Error('delai depasse (connexion interrompue)')); });
+      req.on('error', e => finish(reject, e));
     };
     go(url, 6);
   });

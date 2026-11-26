@@ -72,9 +72,20 @@ function create(options) {
       if (failedList().indexOf(m.version) >= 0) { setStatus({ lastCheck: new Date().toISOString(), message: 'La version ' + m.version + ' a échoué sur cette caisse et est ignorée.', available: { version: m.version, notes: m.notes || '' } }); return; }
       const dest = path.join(updatesDir, 'staged-' + m.version);
       if (fs.existsSync(path.join(dest, '.ready'))) { setStatus({ lastCheck: new Date().toISOString(), message: 'Version ' + m.version + ' prête à installer.', available: { version: m.version, notes: m.notes || '' } }); return; }
-      setStatus({ lastCheck: new Date().toISOString(), message: 'Téléchargement de la version ' + m.version + '…', available: { version: m.version, notes: m.notes || '' } });
-      const pkg = await core.fetchBuffer(base + m.file, { maxBytes: m.size + 1024, timeout: 120000 });
+      setStatus({ lastCheck: new Date().toISOString(), message: 'Téléchargement de la version ' + m.version + '… (0 %)', available: { version: m.version, notes: m.notes || '' } });
+      let lastReported = 0;
+      const pkg = await core.fetchBuffer(base + m.file, {
+        maxBytes: m.size + 1024, timeout: 30000, maxDuration: 15 * 60000,  // a very slow link fails after 15 min instead of sitting in "downloading" forever
+        onProgress: (got, total) => {
+          const known = total || m.size, now = Date.now();
+          if (now - lastReported < 1500 && got < known) return;  // update at most every ~1.5s, always on the final chunk
+          lastReported = now;
+          const pct = known ? Math.min(100, Math.round(got / known * 100)) : 0;
+          setStatus({ message: 'Téléchargement de la version ' + m.version + '… (' + pct + ' %, ' + Math.round(got / 1024 / 1024 * 10) / 10 + ' Mo)' });
+        }
+      });
       if (pkg.length !== m.size || core.sha256(pkg) !== m.sha256) throw new Error('somme de controle du paquet incorrecte');
+      setStatus({ message: 'Vérification de la version ' + m.version + '…' });
       core.extractPackage(pkg, dest);
       const stagedVersion = (readJson(path.join(dest, 'app', 'version.json'), {}) || {}).version;
       if (stagedVersion !== m.version) { core.rimraf(dest); throw new Error('version du paquet differente du manifeste'); }

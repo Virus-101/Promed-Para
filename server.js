@@ -496,7 +496,7 @@ async function api(request, response, url) {
     const token = randomBytes(32).toString('base64url'); sessions.set(token, { userId: owner.id, expires: Date.now() + 30 * 86400_000 });
     return send(response, 201, { user: userSafe(owner) }, { 'Set-Cookie': `pp_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 86400}` });
   }
-  const needsPhoneApproval = (user, request) => user.role === 'owner' && isLocal(request) && process.env.PROMEDPARA_ENABLE_PHONE_APPROVAL === '1' && loadSecurity().phoneApproval === true && Boolean(db.prepare('SELECT 1 AS x FROM owner_devices WHERE user_id=? AND active=1').get(user.id));
+  const needsPhoneApproval = (user, request) => user.role === 'owner' && isLocal(request) && loadSecurity().phoneApproval === true && Boolean(db.prepare('SELECT 1 AS x FROM owner_devices WHERE user_id=? AND active=1').get(user.id));
   const startApproval = (user, response) => {
     purgeApprovals();
     for (const [key, entry] of loginApprovals) if (entry.userId === user.id && entry.status === 'pending') loginApprovals.delete(key);
