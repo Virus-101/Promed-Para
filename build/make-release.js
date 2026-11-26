@@ -20,7 +20,8 @@ function collectFiles(kitDir) {
     }
   };
   for (const dir of core.REPLACED_DIRS) { const abs = path.join(kitDir, dir.split('/').join(path.sep)); if (fs.existsSync(abs)) walk(abs, dir); }
-  for (const f of core.ALLOWED_ROOT_FILES) { const abs = path.join(kitDir, f); if (fs.existsSync(abs)) files.push({ rel: f, abs }); }
+  // Scanned by name pattern, not a fixed list: a new root launcher just needs to exist in the kit to be packaged.
+  for (const name of fs.readdirSync(kitDir)) { const abs = path.join(kitDir, name); if (core.isRootFileName(name) && fs.statSync(abs).isFile()) files.push({ rel: name, abs }); }
   return files;
 }
 

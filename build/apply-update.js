@@ -145,7 +145,9 @@ async function main() {
   backupDatabase(current, TARGET);
   const undo = await swapIn(sources, current);
   // Loose files (guides, launchers, manifest) are small and low-risk: overwritten in place.
-  if (MODE !== 'rollback') for (const f of core.ALLOWED_ROOT_FILES) { const s = path.join(SOURCE, f); if (fs.existsSync(s)) { try { fs.copyFileSync(s, path.join(ROOT, f)); } catch (e) { log('fichier ignore ' + f + ': ' + e.message); } } }
+  // Scanned by name pattern, not a fixed list: a root launcher the staged source has - even one this running
+  // code has never heard of - still gets copied in, instead of silently staying missing until some later update.
+  if (MODE !== 'rollback') { let names = []; try { names = fs.readdirSync(SOURCE); } catch (e) { /* ignore */ } for (const f of names) { if (!core.isRootFileName(f)) continue; const s = path.join(SOURCE, f); try { if (fs.statSync(s).isFile()) fs.copyFileSync(s, path.join(ROOT, f)); } catch (e) { log('fichier ignore ' + f + ': ' + e.message); } } }
   log('dossiers remplaces, demarrage...');
   launchApp();
   let healthy = false;

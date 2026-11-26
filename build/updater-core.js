@@ -11,9 +11,16 @@ const urlLib = require('url');
 
 // What an update may touch. Everything else (runtime, electron binaries, data, logs, config, android) is never replaced.
 const ALLOWED_DIRS = ['app/', 'electron/resources/app/', 'tools/'];
+// Kept for older installs' apply-update.js/make-release.js, which still copy by this exact list.
+// isAllowedPath below no longer depends on it: a till's *currently installed* code is what validates an incoming
+// package, so a brand-new root filename added to a release would make every till still on older code reject that
+// update as "chemin refuse" the moment it tried to extract it - naming a root-level launcher by its safe extension
+// instead of by an exact, ever-growing list means an old till's extractPackage already accepts files it has never heard of.
 const ALLOWED_ROOT_FILES = ['GUIDE.html', 'LIRE-MOI.txt', 'MANIFEST.sha256', 'LANCER-CAISSE.vbs', 'TEST-LECTEUR.vbs', '1-VERIFIER-LE-SYSTEME.bat',
   '2-INSTALLER.bat', '3-COLLECTER-LES-ERREURS.bat', 'ARRETER-LA-CAISSE.bat', 'SAUVEGARDER-LES-DONNEES.bat', 'CONFIGURER-LES-MISES-A-JOUR.bat', 'RESET-CODE-ADMIN.bat',
   'RESTAURER-UNE-SAUVEGARDE.bat', 'CREER-NOUVEAU-PROPRIETAIRE.bat'];
+const ROOT_FILE_EXTENSIONS = /\.(bat|vbs|txt|html|sha256)$/i;
+const isRootFileName = name => typeof name === 'string' && name.length > 0 && name.length <= 120 && ROOT_FILE_EXTENSIONS.test(name) && !/[\\/:\u0000-\u001f]/.test(name);
 const REPLACED_DIRS = ['app', 'electron/resources/app', 'tools'];
 const MAGIC = 'PPK1';
 const MAX_PACKAGE_BYTES = 60 * 1024 * 1024;
@@ -80,7 +87,7 @@ function verifySignature(dataBuf, signatureB64, publicKeyPem) {
 function isAllowedPath(rel) {
   if (typeof rel !== 'string' || !rel || rel.length > 240) return false;
   if (rel.indexOf('\\') >= 0 || rel.indexOf(':') >= 0 || rel.charAt(0) === '/' || /(^|\/)\.\.?(\/|$)/.test(rel) || /[\u0000-\u001f]/.test(rel)) return false;
-  if (ALLOWED_ROOT_FILES.indexOf(rel) >= 0) return true;
+  if (rel.indexOf('/') < 0 && isRootFileName(rel)) return true;
   return ALLOWED_DIRS.some(prefix => rel.indexOf(prefix) === 0 && rel.length > prefix.length);
 }
 
@@ -156,4 +163,4 @@ function housekeeping(root, opts) {
   if (removed.length) log('nettoyage: ' + removed.length + ' element(s)');
   return removed;
 }
-module.exports = { housekeeping, ALLOWED_DIRS, ALLOWED_ROOT_FILES, REPLACED_DIRS, compareVersions, isVersion, sha256, fetchBuffer, verifySignature, isAllowedPath, buildPackage, extractPackage, mkdirp, rimraf };
+module.exports = { housekeeping, ALLOWED_DIRS, ALLOWED_ROOT_FILES, isRootFileName, REPLACED_DIRS, compareVersions, isVersion, sha256, fetchBuffer, verifySignature, isAllowedPath, buildPackage, extractPackage, mkdirp, rimraf };
