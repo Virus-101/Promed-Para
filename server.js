@@ -14,6 +14,17 @@ const LEGACY_EXPORT_PATH = String.raw`F:\para\Articles_15-10-2026 22-35-00-touts
 // Keep the live database on the workstation even when the app itself runs from USB.
 const DATA_DIR = path.resolve(process.env.PROMEDPARA_DATA_DIR || path.join(ROOT, 'data'));
 const execFileAsync = promisify(execFile);
+// Customer-facing pole display (red LED unit): COM2 @ 2400 baud, 8N1, clear (0x0C) then the text to show.
+// Found empirically on this till's exact hardware - no model/protocol documentation existed for it.
+// Shelled out to PowerShell/.NET instead of a native serialport module: Node 12 x86 on Windows 7 has no
+// reliable prebuilt binary for that, while System.IO.Ports.SerialPort needs nothing extra to already be there.
+let displayBusy = Promise.resolve();
+function writeCustomerDisplay(text) {
+  const safe = String(text).slice(0, 20).replace(/[\r\n]/g, ' ');
+  const script = `$p=New-Object System.IO.Ports.SerialPort('COM2',2400,[System.IO.Ports.Parity]::None,8,[System.IO.Ports.StopBits]::One);$p.Open();$b=[byte[]](@(12)+[System.Text.Encoding]::ASCII.GetBytes('${safe.replace(/'/g, "''")}' + "\`r\`n"));$p.Write($b,0,$b.Length);Start-Sleep -Milliseconds 150;$p.Close()`;
+  displayBusy = displayBusy.then(() => execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { timeout: 3000 }).catch(() => { /* display absent/busy: never block a sale over it */ }));
+  return displayBusy;
+}
 const RELAY_URL = 'https://promedpara-relay.onrender.com';   // the owner-phone relay (relay/ folder); can be changed in data/relay.json
 const APP_VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'version.json'), 'utf8')).version || ''; } catch { return ''; } })();
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -834,6 +845,15 @@ async function api(request, response, url) {
     if (who && who.role === 'cashier') { const day = shiftOf(ending.userId, ending.createdAt); const started = ending.createdAt ? new Date(ending.createdAt).toISOString() : (day.since || isoNow()); db.prepare('INSERT INTO shift_reports(id,user_id,user_name,started_at,ended_at,tickets,items,total_cents,lines) VALUES(?,?,?,?,?,?,?,?,?)').run(id('shift'), ending.userId, who.name, started, isoNow(), day.tickets, day.items, day.totalCents, JSON.stringify(day.lines)); db.prepare("DELETE FROM shift_reports WHERE ended_at < ?").run(new Date(Date.now() - 120 * 86400_000).toISOString()); createNotification('Employé déconnecté', `${who.name} · a fermé la caisse · ${day.tickets} ticket(s), ${(day.totalCents / 100).toFixed(2).replace('.', ',')} MAD pendant sa session · détail de chaque produit vendu dans « Fins de journée »`, 'staff'); }
     sessions.delete(cookieToken(request));
     return send(response, 200, { ok: true }, { 'Set-Cookie': 'pp_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+  }
+  if (route === '/api/till/display' && request.method === 'POST') {
+    // The till's own screen tells the physical customer display what to show. Loopback only: this hardware
+    // is wired to this one machine, so a request from anywhere else can't mean anything.
+    if (!isLocal(request)) throw new HttpError(403, 'Réservé à la caisse.');
+    const body = await readBody(request);
+    const totalCents = Number(body.totalCents) || 0;
+    writeCustomerDisplay(totalCents > 0 ? (totalCents / 100).toFixed(2) : 'Promed-Para');
+    return send(response, 200, { ok: true });
   }
   if (route === '/api/update/idle' && request.method === 'GET') {
     // Used by the till's own app to know when nobody has touched the till for a while. Loopback only.
