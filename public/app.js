@@ -75,7 +75,7 @@ function renderLogin(){
   if(state.loginMode==='pin')setTimeout(()=>document.querySelector('#pin-code')?.focus(),30);
   if(state.loginMode==='qr')startQrLogin();
 }
-const navItems = user => user.role==='owner' ? [['dashboard','layout-dashboard','Vue d’ensemble'],['stock','package','Stock & produits'],['suppliers','truck','Fournisseurs'],['sales','receipt','Ventes'],['team','users','Comptes équipe'],['devices','printer','Matériel'],['shop-settings','store','Boutique en ligne']] : [['pos','shopping-cart','Caisse'],['learn','scan-barcode','Codes-barres'],...(user.canReceiveStock?[['receive','package-check','Réception stock']]:[]),...(user.canAddProducts?[['add-products','package-plus','Nouveau produit']]:[])];
+const navItems = user => user.role==='owner' ? [['dashboard','layout-dashboard','Vue d’ensemble'],['pos','shopping-cart','Caisse'],['stock','package','Stock & produits'],['suppliers','truck','Fournisseurs'],['sales','receipt','Ventes'],['team','users','Comptes équipe'],['devices','printer','Matériel'],['shop-settings','store','Boutique en ligne']] : [['pos','shopping-cart','Caisse'],['learn','scan-barcode','Codes-barres'],...(user.canReceiveStock?[['receive','package-check','Réception stock']]:[]),...(user.canAddProducts?[['add-products','package-plus','Nouveau produit']]:[])];
 // In-app dialogs. Electron has no window.prompt, so questions are asked with real modals that return a promise.
 let dialogResolve=null;
 function resolveDialogs(value){const r=dialogResolve;dialogResolve=null;if(r)r(value);}
